@@ -241,6 +241,58 @@ dropped if written to one occurrence, so that is refused too.
 > changes nothing else. Until then the new tools name the account and say to
 > re-link it, rather than failing with an opaque 403.
 
+## Deploying
+
+Any host that runs Node and reaches Postgres works. There is nothing to build,
+no container to define, and the schema applies itself on boot — a fresh
+deployment needs only environment variables.
+
+### Environment
+
+| Variable | Notes |
+|---|---|
+| `DATABASE_URL` | Postgres. The four tables create themselves on first boot |
+| `PUBLIC_BASE_URL` | The public origin, scheme and host only, no trailing slash. Becomes the OAuth issuer and the Google redirect URI, so it must match what Google has registered |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | From the Web application OAuth client |
+| `MCP_ADMIN_PASSWORD` | Gates linking an account and approving Claude's consent. The only thing between a stranger who finds the URL and your mailboxes — make it long |
+| `TOKEN_ENC_KEY` | 32 bytes, base64. Encrypts Google tokens at rest. **Losing or changing it makes every stored token undecryptable** |
+| `JWT_SECRET` | Any long random string; signs MCP tokens via a derived key. Changing it only forces Claude to authenticate again |
+| `PORT` | Optional, defaults to 3000. Most platforms set this for you |
+
+`/gmail/check` diagnoses a bad Google client without running the whole consent
+round-trip, and reports which of the two variables Google rejected. Values are
+never echoed back.
+
+### On Railway
+
+Create a project from this repository and add a Postgres service, which
+provides `DATABASE_URL` for the app service to reference. Set the rest above, take the generated domain as
+`PUBLIC_BASE_URL`, and register `<PUBLIC_BASE_URL>/gmail/oauth/callback` as an
+authorized redirect URI on the OAuth client. Pushes to the default branch
+redeploy automatically.
+
+### Moving an existing deployment
+
+Two facts make this a cutover rather than a migration, with no downtime and no
+re-linking:
+
+- **Point the new deployment at the same database.** The schema is
+  `CREATE TABLE IF NOT EXISTS`, so it is a no-op against tables that already
+  exist, and every linked account carries over untouched.
+- **Carry `TOKEN_ENC_KEY` across unchanged.** Tokens are AES-256-GCM, which is
+  authenticated: a different key fails the tag check and throws rather than
+  returning nonsense, so the failure is loud — but every account is unusable
+  until the original key is restored.
+
+An OAuth client accepts several redirect URIs, so **add** the new deployment's
+callback rather than replacing the old one. Both deployments can then run side
+by side against the same database — nothing else writes those four tables —
+which leaves room to verify the new one before retiring the old.
+
+Expect Claude to authenticate once more afterwards if `JWT_SECRET` changed.
+Linked Google accounts survive it: they are keyed to a constant subject, not to
+any particular token.
+
 ## Security notes
 
 - Google refresh and access tokens are AES-256-GCM encrypted at rest under
