@@ -21,6 +21,7 @@
     "test:drive-parity": "node test/drive_parity.test.js",
     "test:reach": "node test/shared_drives_recurrence.test.js",
     "test:ownership": "node test/ownership.test.js",
+    "probe": "node test/probe_live.js",
     "smoke": "node test/smoke_live.js"
   },
   "engines": { "node": ">=20" },

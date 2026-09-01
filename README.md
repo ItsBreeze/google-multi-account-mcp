@@ -271,6 +271,24 @@ provides `DATABASE_URL` for the app service to reference. Set the rest above, ta
 authorized redirect URI on the OAuth client. Pushes to the default branch
 redeploy automatically.
 
+### Checking a deployment came up
+
+```
+npm run probe https://your-deployment.example.com
+```
+
+No credentials, no linked accounts, every request a `GET` — so it is what to
+run when a deploy may not have started at all. `src/server.js` calls
+`app.listen` only after the schema is applied, so anything answering `/health`
+is already proof the database was reachable at boot. The probe goes on to check
+that the app's own router is serving rather than the platform's error page, that
+`PUBLIC_BASE_URL` matches the host it is actually reachable at — the cause
+behind Google's `redirect_uri_mismatch` — and that `/mcp` refuses
+unauthenticated traffic.
+
+`npm run smoke` is the deeper check, against real Google data, and needs the
+operator password and linked accounts.
+
 ### Moving an existing deployment
 
 Two facts make this a cutover rather than a migration, with no downtime and no
