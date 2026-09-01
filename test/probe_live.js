@@ -2,9 +2,9 @@
  * Credential-free liveness probe — run this first, right after a deploy.
  *   npm run probe https://your-deployment.example.com
  *
- * `npm run smoke` is the deeper check, but it needs the operator password and
- * linked accounts. This needs neither, so it is what you run when a deploy may
- * not have come up at all.
+ * `npm run smoke` is the deeper check, but it needs the deployment's JWT_SECRET
+ * and an owner key to mint a session with. This needs neither, so it is what you
+ * run when a deploy may not have come up at all.
  *
  * Read-only: every request is a GET, none carries a credential, none writes.
  * It answers three questions in order — is the process listening, did the
@@ -97,10 +97,27 @@ async function get(path) {
   if (mcp.res.status === 401) ok('/mcp unauthenticated', challenge ? `401 with ${challenge}` : '401 (no WWW-Authenticate header)');
   else bad('/mcp unauthenticated', `expected 401, got HTTP ${mcp.res.status}`);
 
-  // 5. The linking page renders, which is where accounts are re-linked.
+  // 5. The linking page is identity-gated, and says so rather than erroring.
+  //    Unauthenticated it answers 401 with the sign-in prompt, which is the
+  //    correct response and proof that per-user identity is switched on: a 200
+  //    here would mean anyone reaching the URL is offered the link form.
   const connect = await get('/gmail/connect');
-  if (connect.res.status === 200 && /password/i.test(connect.text)) ok('/gmail/connect', 'password form renders');
-  else bad('/gmail/connect', `HTTP ${connect.res.status}`);
+  if (connect.res.status === 401 && /\/gmail\/signin/.test(connect.text)) {
+    ok('/gmail/connect', '401 with the sign-in prompt — identity gating is on');
+  } else if (connect.res.status === 200) {
+    bad('/gmail/connect', 'served the link form without a session — identity gating is not active');
+  } else {
+    bad('/gmail/connect', `expected 401 with a sign-in prompt, got HTTP ${connect.res.status}`);
+  }
+
+  // 6. Sign-in hands off to Google rather than 500ing on a missing JWT_SECRET.
+  const signin = await get('/gmail/signin');
+  const location = signin.res.headers.get('location') || '';
+  if (signin.res.status === 302 && /^https:\/\/accounts\.google\.com\//.test(location)) {
+    ok('/gmail/signin', 'redirects to Google');
+  } else {
+    bad('/gmail/signin', `expected a 302 to accounts.google.com, got HTTP ${signin.res.status}`);
+  }
 
   console.log(failed ? `\n${failed} check(s) failed.` : '\nDeployment is up and configured.');
   process.exit(failed ? 1 : 0);

@@ -28,12 +28,13 @@ const mcpLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// The endpoints that check MCP_ADMIN_PASSWORD are the only brute-forceable
-// surface on a public URL, so they get a far tighter budget than the tool
-// traffic around them. Successful requests do not count against it.
-const passwordLimiter = rateLimit({
+// Sign-in and authorization are the unauthenticated surface on a public URL,
+// so they get a far tighter budget than the tool traffic around them. There is
+// no longer a password to guess here, but the sign-in redirect still starts an
+// OAuth round-trip against Google, and that is worth not letting anyone spray.
+const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: 30,
   skipSuccessfulRequests: true,
   message: { error: 'Too many attempts — try again in 15 minutes' },
   standardHeaders: true,
@@ -57,11 +58,8 @@ app.get('/.well-known/oauth-authorization-server',
 app.get('/.well-known/oauth-authorization-server/mcp',
   oauthMetadata(() => mcpOauth.authorizationServerMetadata()));
 
-app.post('/mcp/oauth/authorize', passwordLimiter);
-app.post('/gmail/connect',       passwordLimiter);
-app.post('/gmail/check',         passwordLimiter);
-app.post('/gmail/unlink',        passwordLimiter);
-app.post('/gmail/accounts',      passwordLimiter);
+app.post('/mcp/oauth/authorize', authLimiter);
+app.get('/gmail/signin',         authLimiter);
 
 app.use('/mcp',   mcpLimiter, requireConfigured, mcpRoutes);
 app.use('/gmail', requireConfigured, gmailLinkRoutes);

@@ -58,6 +58,18 @@ CREATE TABLE IF NOT EXISTS mcp_refresh_tokens (
 );
 
 CREATE INDEX IF NOT EXISTS idx_mcp_refresh_tokens_expiry ON mcp_refresh_tokens(expires_at);
+
+-- Per-user identity cutover.
+--
+-- Both tables predate it, when every token was issued to a single operator and
+-- the subject was the constant 'owner'. Adding the column with that default
+-- keeps codes and refresh tokens already in a client's hands working across the
+-- upgrade, instead of logging everyone out on deploy. New rows always write an
+-- explicit owner_key, so the default only ever applies to pre-existing ones.
+ALTER TABLE mcp_auth_codes     ADD COLUMN IF NOT EXISTS owner_key TEXT NOT NULL DEFAULT 'owner';
+ALTER TABLE mcp_refresh_tokens ADD COLUMN IF NOT EXISTS owner_key TEXT NOT NULL DEFAULT 'owner';
+
+CREATE INDEX IF NOT EXISTS idx_mcp_refresh_tokens_owner ON mcp_refresh_tokens(owner_key);
 `;
 
 async function migrate() {

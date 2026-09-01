@@ -3,12 +3,18 @@
  *
  * Mounted at /mcp. Add `https://<host>/mcp` as a custom connector in Claude and
  * the discovery → registration → authorize → token dance below runs itself; the
- * only human step is typing MCP_ADMIN_PASSWORD once at the consent screen.
+ * only human step is signing in with Google once at the consent screen.
+ *
+ * That sign-in is what makes the connector safe to hand to more than one
+ * person. The identity it establishes is stamped into the authorization code,
+ * and from there into every access and refresh token, so each caller reaches
+ * only the mailboxes linked under their own identity.
  */
 
-const express = require('express');
-const oauth   = require('../services/mcp_oauth');
-const tools   = require('../mcp/tools');
+const express  = require('express');
+const oauth    = require('../services/mcp_oauth');
+const identity = require('../services/identity');
+const tools    = require('../mcp/tools');
 
 const router = express.Router();
 
@@ -23,7 +29,7 @@ const escapeHtml = (s) => String(s).replace(/[&<>"']/g,
 
 const REQUIRED_ENV = [
   'PUBLIC_BASE_URL', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET',
-  'MCP_ADMIN_PASSWORD', 'TOKEN_ENC_KEY',
+  'JWT_SECRET', 'TOKEN_ENC_KEY',
 ];
 
 /**
@@ -64,11 +70,33 @@ router.post('/oauth/register', express.json(), async (req, res, next) => {
 
 // ─── OAuth: authorization (consent screen) ──────────────────────────────────
 
-function consentPage({ params, error }) {
+/** The authorize URL to return to once sign-in completes. */
+function authorizeUrlFor(params) {
+  const carried = Object.entries(params).filter(([k, v]) => k !== 'password' && v);
+  return `/mcp/oauth/authorize?${new URLSearchParams(Object.fromEntries(carried)).toString()}`;
+}
+
+function consentPage({ params, session, error, nextUrl }) {
   const hidden = ['client_id', 'redirect_uri', 'state', 'code_challenge', 'code_challenge_method', 'scope', 'response_type']
     .filter(k => params[k])
     .map(k => `<input type="hidden" name="${k}" value="${escapeHtml(params[k])}">`)
     .join('\n      ');
+
+  const back = encodeURIComponent(nextUrl || authorizeUrlFor(params));
+
+  // Signed out, the only offered action is to sign in. Signed in, the caller is
+  // told which identity is about to be granted, because "authorize" means
+  // nothing useful unless you know who you are authorizing as.
+  const action = session
+    ? `<p>Signing in as <code>${escapeHtml(session.email || session.ownerKey)}</code>.
+          Claude will reach the Google accounts linked under this identity, and no others.</p>
+       <form method="POST" action="/mcp/oauth/authorize">
+      ${hidden}
+         <button type="submit">Authorize Claude</button>
+       </form>
+       <p class="alt"><a href="/gmail/signout?next=${back}">Use a different account</a></p>`
+    : `<p>Sign in so the connector knows whose mailboxes to open.</p>
+       <a class="btn" href="/gmail/signin?next=${back}">Continue with Google</a>`;
 
   return `<!doctype html>
 <html><head><meta charset="utf-8">
@@ -81,21 +109,18 @@ function consentPage({ params, error }) {
   .card { width: 100%; max-width: 380px; }
   h1 { font-size: 1.25rem; margin: 0 0 .5rem; }
   p { margin: 0 0 1.25rem; opacity: .75; font-size: .95rem; }
-  input[type=password] { width: 100%; padding: .8rem; font-size: 1rem; box-sizing: border-box;
-    border: 1px solid rgba(128,128,128,.5); border-radius: 10px; background: transparent; color: inherit; }
-  button { width: 100%; padding: .85rem; font-size: 1rem; font-weight: 600; margin-top: .75rem;
-    border: 0; border-radius: 10px; background: #2563eb; color: #fff; }
+  button, .btn { display: block; width: 100%; box-sizing: border-box; text-align: center;
+    padding: .85rem; font-size: 1rem; font-weight: 600; margin-top: .75rem; border: 0;
+    border-radius: 10px; background: #2563eb; color: #fff; text-decoration: none; }
+  code { background: rgba(128,128,128,.15); padding: .15rem .35rem; border-radius: 5px; font-size: .9em; }
   .err { color: #dc2626; font-size: .9rem; margin-bottom: .75rem; }
+  .alt { margin-top: 1rem; font-size: .85rem; text-align: center; }
 </style></head>
 <body><div class="card">
   <h1>Authorize Gmail connector</h1>
   <p>Claude is asking to connect to your multi-account Gmail server.</p>
   ${error ? `<div class="err">${escapeHtml(error)}</div>` : ''}
-  <form method="POST" action="/mcp/oauth/authorize">
-      ${hidden}
-    <input type="password" name="password" placeholder="Operator password" autofocus required autocomplete="current-password">
-    <button type="submit">Authorize</button>
-  </form>
+  ${action}
 </div></body></html>`;
 }
 
@@ -120,21 +145,33 @@ async function validateAuthRequest(params) {
 }
 
 router.get('/oauth/authorize', async (req, res) => {
+  const session = identity.readSession(req);
+  const nextUrl = req.originalUrl;
+
   try {
     await validateAuthRequest(req.query);
-    res.type('html').send(consentPage({ params: req.query }));
+    res.type('html').send(consentPage({ params: req.query, session, nextUrl }));
   } catch (err) {
-    res.status(400).type('html').send(consentPage({ params: req.query, error: err.message }));
+    res.status(400).type('html').send(consentPage({ params: req.query, session, nextUrl, error: err.message }));
   }
 });
 
 router.post('/oauth/authorize', express.urlencoded({ extended: false }), async (req, res, next) => {
-  const params = req.body || {};
+  const params  = req.body || {};
+  const session = identity.readSession(req);
+  const nextUrl = authorizeUrlFor(params);
+
   try {
     await validateAuthRequest(params);
 
-    if (!oauth.checkAdminPassword(params.password)) {
-      return res.status(401).type('html').send(consentPage({ params, error: 'Incorrect password.' }));
+    // A session can lapse between rendering this page and submitting it. Send
+    // the caller back through sign-in with the request intact, rather than
+    // failing an authorization that was only ever a few seconds stale.
+    if (!session) {
+      return res.status(401).type('html').send(consentPage({
+        params, session: null, nextUrl,
+        error: 'That sign-in expired. Sign in again to authorize.',
+      }));
     }
 
     const code = await oauth.issueAuthCode({
@@ -142,6 +179,7 @@ router.post('/oauth/authorize', express.urlencoded({ extended: false }), async (
       redirectUri:   params.redirect_uri,
       codeChallenge: params.code_challenge,
       scope:         params.scope,
+      ownerKey:      session.ownerKey,
     });
 
     const target = new URL(params.redirect_uri);
@@ -150,8 +188,7 @@ router.post('/oauth/authorize', express.urlencoded({ extended: false }), async (
 
     res.redirect(302, target.toString());
   } catch (err) {
-    if (err.message === 'MCP_ADMIN_PASSWORD is not set — refusing to authorize') return next(err);
-    res.status(400).type('html').send(consentPage({ params, error: err.message }));
+    res.status(400).type('html').send(consentPage({ params, session, nextUrl, error: err.message }));
   }
 });
 
@@ -167,7 +204,11 @@ router.post('/oauth/token', express.urlencoded({ extended: false }), express.jso
         redirectUri:  body.redirect_uri,
         codeVerifier: body.code_verifier,
       });
-      return res.json(await oauth.issueTokens({ clientId: body.client_id, scope: granted.scope }));
+      return res.json(await oauth.issueTokens({
+        clientId: body.client_id,
+        scope:    granted.scope,
+        ownerKey: granted.owner_key,
+      }));
     }
 
     if (body.grant_type === 'refresh_token') {

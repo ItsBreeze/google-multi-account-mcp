@@ -1,10 +1,19 @@
 {
   "name": "google-multi-account-mcp",
   "version": "1.0.0",
-  "description": "A remote MCP server that gives Claude several Google accounts at once — Gmail, Calendar, Drive, Contacts and Tasks — where the first-party connectors hold one each",
+  "description": "A remote MCP server that gives Claude several Google accounts at once \u2014 Gmail, Calendar, Drive, Contacts and Tasks \u2014 where the first-party connectors hold one each",
   "main": "src/server.js",
   "license": "MIT",
-  "keywords": ["mcp", "model-context-protocol", "claude", "google", "gmail", "google-drive", "google-calendar", "connector"],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "google",
+    "gmail",
+    "google-drive",
+    "google-calendar",
+    "connector"
+  ],
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
@@ -22,9 +31,12 @@
     "test:reach": "node test/shared_drives_recurrence.test.js",
     "test:ownership": "node test/ownership.test.js",
     "probe": "node test/probe_live.js",
-    "smoke": "node test/smoke_live.js"
+    "smoke": "node test/smoke_live.js",
+    "test:isolation": "node test/tenant_isolation.test.js"
   },
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "dotenv": "^16.4.5",
     "express": "^4.19.2",

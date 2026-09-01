@@ -227,12 +227,28 @@ dropped if written to one occurrence, so that is refused too.
    **Web application** with the authorized redirect URI set to exactly
    `<PUBLIC_BASE_URL>/gmail/oauth/callback`.
 2. **Env** — set `DATABASE_URL`, `PUBLIC_BASE_URL`, `GOOGLE_CLIENT_ID`,
-   `GOOGLE_CLIENT_SECRET`, `MCP_ADMIN_PASSWORD`, `TOKEN_ENC_KEY` and `JWT_SECRET`
+   `GOOGLE_CLIENT_SECRET`, `TOKEN_ENC_KEY` and `JWT_SECRET`
    (see `.env.example`), then deploy. The schema applies itself on boot.
-3. **Link accounts** — visit `<PUBLIC_BASE_URL>/gmail/connect` once per account.
+3. **Link accounts** — visit `<PUBLIC_BASE_URL>/gmail/connect`, sign in with
+   Google, then link each account once. The account you sign in with and the
+   accounts you link are independent; sign in as yourself and link whichever
+   mailboxes you like beneath that identity.
 4. **Add to Claude** — Settings → Connectors → Add custom connector →
-   `<PUBLIC_BASE_URL>/mcp`. Claude registers itself, sends you to the consent
-   screen, and you enter `MCP_ADMIN_PASSWORD` once.
+   `<PUBLIC_BASE_URL>/mcp`. Claude registers itself and sends you to the consent
+   screen, where you sign in with Google once.
+
+### Who sees what
+
+Every mailbox is stored against the identity that linked it, and every MCP token
+carries that identity as its subject — through refreshes as well as the first
+grant. Two people using the same deployment reach only their own accounts, and
+naming somebody else's address in a tool call is refused rather than served.
+`npm run test:isolation` asserts exactly that.
+
+Upgrading from the single-operator build, where every token carried the same
+subject: set `LEGACY_OWNER_EMAIL` to the address those mailboxes belong to, and
+the first sign-in from that address adopts them. Nothing needs re-linking.
+Unset it afterwards.
 
 > **If you linked accounts before adding a product:** the granted scopes are fixed at link
 > time, so an account linked before Calendar, Drive, Contacts and Tasks existed
@@ -254,9 +270,9 @@ deployment needs only environment variables.
 | `DATABASE_URL` | Postgres. The four tables create themselves on first boot |
 | `PUBLIC_BASE_URL` | The public origin, scheme and host only, no trailing slash. Becomes the OAuth issuer and the Google redirect URI, so it must match what Google has registered |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | From the Web application OAuth client |
-| `MCP_ADMIN_PASSWORD` | Gates linking an account and approving Claude's consent. The only thing between a stranger who finds the URL and your mailboxes — make it long |
 | `TOKEN_ENC_KEY` | 32 bytes, base64. Encrypts Google tokens at rest. **Losing or changing it makes every stored token undecryptable** |
-| `JWT_SECRET` | Any long random string; signs MCP tokens via a derived key. Changing it only forces Claude to authenticate again |
+| `JWT_SECRET` | Any long random string; signs MCP tokens and browser sessions via two separately derived keys. Changing it only forces everyone to authenticate again |
+| `LEGACY_OWNER_EMAIL` | Optional, one-time. Adopts mailboxes linked before per-user sign-in existed, on that address's first sign-in |
 | `PORT` | Optional, defaults to 3000. Most platforms set this for you |
 
 `/gmail/check` diagnoses a bad Google client without running the whole consent
@@ -283,11 +299,12 @@ run when a deploy may not have started at all. `src/server.js` calls
 is already proof the database was reachable at boot. The probe goes on to check
 that the app's own router is serving rather than the platform's error page, that
 `PUBLIC_BASE_URL` matches the host it is actually reachable at — the cause
-behind Google's `redirect_uri_mismatch` — and that `/mcp` refuses
-unauthenticated traffic.
+behind Google's `redirect_uri_mismatch` — that `/mcp` refuses unauthenticated
+traffic, and that `/gmail/connect` answers `401` with the sign-in prompt rather
+than serving the link form to whoever finds the URL.
 
 `npm run smoke` is the deeper check, against real Google data, and needs the
-operator password and linked accounts.
+deployment's `JWT_SECRET` and an owner key to mint a session with.
 
 ### Moving an existing deployment
 

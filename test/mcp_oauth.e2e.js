@@ -1,14 +1,33 @@
 /**
  * End-to-end OAuth 2.1 + MCP protocol suite.
  * Start the API first, then:
- *   TEST_BASE_URL=http://127.0.0.1:3999 npm run test:mcp
+ *   TEST_BASE_URL=http://127.0.0.1:3999 JWT_SECRET=<server's> npm run test:mcp
+ *
+ * The consent screen is gated on a Google sign-in, which cannot be scripted.
+ * What that sign-in produces, though, is just a session cookie signed with the
+ * server's JWT_SECRET — so a test that shares the secret can mint one. It does
+ * that through the server's own identity module rather than by re-deriving the
+ * signing key here, so the two cannot drift apart, and no test-only bypass has
+ * to exist in the server itself.
  */
 
 const crypto = require('crypto');
 const b64url = b => b.toString('base64url');
 
 const BASE = process.env.TEST_BASE_URL || 'http://127.0.0.1:3999';
-const OPERATOR_PW = process.env.MCP_ADMIN_PASSWORD || 'test-operator-pw';
+
+const identity = require('../src/services/identity');
+const OWNER    = 'google:e2e-test-subject';
+
+/** A session cookie the server under test will accept, built the way it builds them. */
+function sessionCookie(ownerKey = OWNER) {
+  const captured = [];
+  identity.issueSession(
+    { append: (name, value) => captured.push(value) },
+    { ownerKey, email: 'e2e@example.com' },
+  );
+  return String(captured[0]).split(';')[0];
+}
 let pass = 0, fail = 0;
 const check = (name, cond, extra='') => {
   (cond ? pass++ : fail++);
@@ -50,7 +69,12 @@ const check = (name, cond, extra='') => {
     response_type:'code', code_challenge: challenge, code_challenge_method:'S256', state:'xyz' });
 
   const consent = await fetch(`${BASE}/mcp/oauth/authorize?${q}`);
-  check('consent screen renders', consent.status === 200 && (await consent.text()).includes('Operator password'));
+  check('signed-out consent screen offers sign-in',
+    consent.status === 200 && (await consent.text()).includes('Continue with Google'));
+
+  const consentIn = await fetch(`${BASE}/mcp/oauth/authorize?${q}`, { headers: { Cookie: sessionCookie() } });
+  check('signed-in consent screen names the identity',
+    consentIn.status === 200 && (await consentIn.text()).includes('e2e@example.com'));
 
   const mismatch = await fetch(`${BASE}/mcp/oauth/authorize?${new URLSearchParams({...Object.fromEntries(q), redirect_uri:'https://evil.example.com/cb'})}`);
   check('unregistered redirect_uri rejected', mismatch.status === 400);
@@ -58,21 +82,28 @@ const check = (name, cond, extra='') => {
   const noPkce = await fetch(`${BASE}/mcp/oauth/authorize?${new URLSearchParams({client_id:client.client_id, redirect_uri:REDIRECT, response_type:'code'})}`);
   check('missing PKCE rejected', noPkce.status === 400);
 
-  const form = (obj) => ({ method:'POST',
-    headers:{'Content-Type':'application/x-www-form-urlencoded'},
+  const form = (obj, cookie) => ({ method:'POST',
+    headers:{ 'Content-Type':'application/x-www-form-urlencoded',
+              ...(cookie ? { Cookie: cookie } : {}) },
     body: new URLSearchParams(obj).toString(), redirect:'manual' });
 
-  const wrongPw = await fetch(`${BASE}/mcp/oauth/authorize`, form({
+  const signedOut = await fetch(`${BASE}/mcp/oauth/authorize`, form({
     client_id:client.client_id, redirect_uri:REDIRECT, response_type:'code',
-    code_challenge:challenge, code_challenge_method:'S256', state:'xyz', password:'wrong' }));
-  check('wrong operator password → 401', wrongPw.status === 401);
+    code_challenge:challenge, code_challenge_method:'S256', state:'xyz' }));
+  check('authorizing without a session → 401', signedOut.status === 401);
 
-  const okPw = await fetch(`${BASE}/mcp/oauth/authorize`, form({
+  const forged = await fetch(`${BASE}/mcp/oauth/authorize`, form({
     client_id:client.client_id, redirect_uri:REDIRECT, response_type:'code',
-    code_challenge:challenge, code_challenge_method:'S256', state:'xyz', password: OPERATOR_PW }));
-  const loc = new URL(okPw.headers.get('location'));
+    code_challenge:challenge, code_challenge_method:'S256', state:'xyz' },
+    'mcp_session=not-a-real-session'));
+  check('a forged session cookie → 401', forged.status === 401);
+
+  const okAuth = await fetch(`${BASE}/mcp/oauth/authorize`, form({
+    client_id:client.client_id, redirect_uri:REDIRECT, response_type:'code',
+    code_challenge:challenge, code_challenge_method:'S256', state:'xyz' }, sessionCookie()));
+  const loc = new URL(okAuth.headers.get('location'));
   const code = loc.searchParams.get('code');
-  check('correct password redirects with code', okPw.status === 302 && !!code);
+  check('a signed-in caller redirects with code', okAuth.status === 302 && !!code);
   check('state round-trips', loc.searchParams.get('state') === 'xyz');
 
   // 5. token exchange
@@ -82,10 +113,10 @@ const check = (name, cond, extra='') => {
   check('wrong PKCE verifier rejected', badVerifier.status === 400);
 
   // that failed attempt consumed the code — get a fresh one
-  const okPw2 = await fetch(`${BASE}/mcp/oauth/authorize`, form({
+  const okAuth2 = await fetch(`${BASE}/mcp/oauth/authorize`, form({
     client_id:client.client_id, redirect_uri:REDIRECT, response_type:'code',
-    code_challenge:challenge, code_challenge_method:'S256', password: OPERATOR_PW }));
-  const code2 = new URL(okPw2.headers.get('location')).searchParams.get('code');
+    code_challenge:challenge, code_challenge_method:'S256' }, sessionCookie()));
+  const code2 = new URL(okAuth2.headers.get('location')).searchParams.get('code');
 
   const tok = await fetch(`${BASE}/mcp/oauth/token`, form({
     grant_type:'authorization_code', code: code2, client_id:client.client_id,
@@ -208,16 +239,24 @@ const check = (name, cond, extra='') => {
   check('old refresh token rejected after rotation', reuse.status === 400);
 
   // 8. gmail link gate
-  const linkPage = await fetch(`${BASE}/gmail/connect`);
+  const signedOutPage = await fetch(`${BASE}/gmail/connect`);
+  check('link page is closed to signed-out callers',
+    signedOutPage.status === 401 && (await signedOutPage.text()).includes('Continue with Google'));
+
+  const linkPage = await fetch(`${BASE}/gmail/connect`, { headers: { Cookie: sessionCookie() } });
   const linkHtml = await linkPage.text();
-  check('link page renders', linkPage.status === 200 && linkHtml.includes('Link a Google account'));
+  check('link page renders for a signed-in caller',
+    linkPage.status === 200 && linkHtml.includes('Link a Google account'));
   check('link page discloses what the grant covers',
     ['Gmail', 'Calendar', 'Drive', 'Contacts', 'Tasks'].every(p => linkHtml.includes(`<strong>${p}</strong>`)));
 
-  const linkWrong = await fetch(`${BASE}/gmail/connect`, form({ password:'nope' }));
-  check('link flow rejects wrong password', linkWrong.status === 401);
+  const linkNoSession = await fetch(`${BASE}/gmail/connect`, form({}));
+  check('link flow rejects a caller with no session', linkNoSession.status === 401);
 
-  const linkOk = await fetch(`${BASE}/gmail/connect`, form({ password: OPERATOR_PW }));
+  const linkForged = await fetch(`${BASE}/gmail/connect`, form({}, 'mcp_session=not-a-real-session'));
+  check('link flow rejects a forged session', linkForged.status === 401);
+
+  const linkOk = await fetch(`${BASE}/gmail/connect`, form({}, sessionCookie()));
   const g = linkOk.headers.get('location') || '';
   check('link flow redirects to Google with offline access',
     g.startsWith('https://accounts.google.com/') && g.includes('access_type=offline') && g.includes('prompt=consent'));
@@ -230,16 +269,23 @@ const check = (name, cond, extra='') => {
   const badState = await fetch(`${BASE}/gmail/oauth/callback?code=x&state=forged`);
   check('forged OAuth state rejected', badState.status === 400);
 
-  // Must be LAST: tripping the password limiter would break the checks above.
+  // Must be LAST: tripping the limiter would break the checks above.
+  //
+  // There is no password left to guess, but /mcp/oauth/authorize is still the
+  // unauthenticated door on a public URL — every rejected attempt is cheap for
+  // the caller and not for the server — so it stays throttled. The budget is
+  // shared with the successful authorizations earlier in this run, so the count
+  // here is a ceiling rather than an exact figure.
   let sawLimit = false, attempts = 0;
-  for (let i = 0; i < 14; i++) {
+  for (let i = 0; i < 45; i++) {
     const r = await fetch(`${BASE}/mcp/oauth/authorize`, form({
       client_id: client.client_id, redirect_uri: REDIRECT, response_type: 'code',
-      code_challenge: challenge, code_challenge_method: 'S256', password: `guess-${i}` }));
+      code_challenge: challenge, code_challenge_method: 'S256', state: `probe-${i}` }));
     attempts++;
     if (r.status === 429) { sawLimit = true; break; }
   }
-  check('password guessing is rate-limited', sawLimit, `throttled after ${attempts} attempts`);
+  check('unauthenticated authorize attempts are rate-limited', sawLimit,
+    sawLimit ? `throttled after ${attempts} attempts` : 'never throttled');
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

@@ -1,11 +1,18 @@
 /**
  * Live smoke test — every product, against real Google data.
- *   SMOKE_BASE_URL=https://…  MCP_ADMIN_PASSWORD=…  npm run smoke
+ *   SMOKE_BASE_URL=https://…  JWT_SECRET=…  SMOKE_OWNER_KEY=google:…  npm run smoke
  *
  * Run this from a machine that can reach the deployment, right after
  * re-linking accounts. It signs in the same way Claude does — dynamic client
- * registration, the operator consent screen, PKCE, token exchange — then calls
- * one read tool per product and reports what came back.
+ * registration, consent, PKCE, token exchange — then calls one read tool per
+ * product and reports what came back.
+ *
+ * The consent screen now requires a Google sign-in, which cannot be scripted.
+ * What that sign-in produces is a session cookie signed with the deployment's
+ * JWT_SECRET, so this mints one directly, for the owner named in
+ * SMOKE_OWNER_KEY — whose mailboxes it will then read. Both values belong to
+ * the deployment being tested; there is no way to smoke-test someone else's
+ * accounts, which is the point.
  *
  * READ-ONLY BY CONSTRUCTION. Every tool it may call is on the allow-list below
  * and the runner refuses anything absent from it, so pointing this at
@@ -18,12 +25,25 @@
 
 const crypto = require('crypto');
 
-const BASE     = (process.env.SMOKE_BASE_URL || process.env.TEST_BASE_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
-const PASSWORD = process.env.MCP_ADMIN_PASSWORD;
+const BASE      = (process.env.SMOKE_BASE_URL || process.env.TEST_BASE_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
+const OWNER_KEY = process.env.SMOKE_OWNER_KEY;
 
-if (!PASSWORD) {
-  console.error('Set MCP_ADMIN_PASSWORD (the operator password for this deployment).');
+if (!process.env.JWT_SECRET || !OWNER_KEY) {
+  console.error('Set JWT_SECRET (the deployment\'s) and SMOKE_OWNER_KEY (e.g. google:1234567890).');
+  console.error('SMOKE_OWNER_KEY is the owner_key on your rows in the gmail_accounts table.');
   process.exit(2);
+}
+
+const identity = require('../src/services/identity');
+
+/** A session cookie this deployment will accept, built the way it builds them. */
+function sessionCookie() {
+  const captured = [];
+  identity.issueSession(
+    { append: (name, value) => captured.push(value) },
+    { ownerKey: OWNER_KEY, email: 'smoke@local' },
+  );
+  return String(captured[0]).split(';')[0];
 }
 
 /** Nothing here writes. The runner enforces it rather than trusting the list below to stay read-only. */
@@ -44,9 +64,12 @@ const ok   = (label, detail = '') => { passed++; console.log(`  ok    ${label}${
 const bad  = (label, detail = '') => { failed++; console.log(`  FAIL  ${label}${detail ? ' — ' + detail : ''}`); };
 const note = (label, detail = '') => { skipped++; console.log(`  --    ${label}${detail ? ' — ' + detail : ''}`); };
 
-const form = (obj) => ({
+const form = (obj, cookie) => ({
   method: 'POST',
-  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  headers: {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    ...(cookie ? { Cookie: cookie } : {}),
+  },
   body: new URLSearchParams(obj).toString(),
   redirect: 'manual',
 });
@@ -70,10 +93,11 @@ async function signIn() {
     code_challenge: challenge,
     code_challenge_method: 'S256',
     state: 'smoke',
-    password: PASSWORD,
-  }));
+  }, sessionCookie()));
 
-  if (consent.status === 401) throw new Error('The operator password was rejected.');
+  if (consent.status === 401) {
+    throw new Error('The session was rejected — JWT_SECRET does not match this deployment.');
+  }
   const location = consent.headers.get('location');
   if (!location) throw new Error(`Consent did not redirect (HTTP ${consent.status}) — is this the right deployment?`);
 

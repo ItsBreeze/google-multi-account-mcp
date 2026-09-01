@@ -149,6 +149,59 @@ work without confirmation even on files you do not own. The asymmetry is the
 point: widening access needs approval, narrowing never does, and a brake that
 needs permission is not a brake.
 
+## 7 — One operator became many people
+
+Everything before this assumed a single user. `MCP_ADMIN_PASSWORD` gated the
+consent screen, and the token it produced carried `sub: 'owner'` — a constant.
+`gmail_accounts.owner_key` existed and every query filtered on it, but only one
+value was ever written, so the column separated nothing. That is correct for a
+connector one person runs for themselves, and it is disqualifying the moment a
+second person can add the URL: knowing the password would have meant reading the
+first person's mail.
+
+**Identity comes from Google, not from a local account.** A password proves
+someone knew a secret; opening this up needs to know *which person* is asking.
+Adding usernames and passwords here would have meant storing credentials,
+resetting them, and getting all of that right. Google is already the identity
+provider for every mailbox this server talks to, and every user of it
+necessarily has a Google account, so the sign-in asks Google — for identity
+only: `openid`, `email`, `profile`, no offline access, reading nothing.
+
+**The key is Google's `sub`, not the email address.** An address can be renamed
+or reassigned to a new person, and an owner key that moves between humans hands
+one person another's mailboxes. `sub` is stable and opaque. The `google:` prefix
+leaves room for a second provider later without collisions.
+
+**Sign-in reuses the existing redirect URI.** Identity and mailbox-linking are
+different grants that meet at `/gmail/oauth/callback` and are told apart by a
+`purpose` claim in the signed state. A second redirect URI would have been
+tidier, but it would have required every existing deployment to edit its OAuth
+client in the Cloud console before the upgrade worked. Reusing the one already
+registered means the change is deploy-and-go.
+
+**Codes and refresh tokens carry the owner too.** This is the part that would
+have been easy to miss: `mcp_auth_codes` and `mcp_refresh_tokens` had no owner
+column, so identity established at the consent screen would have been lost at
+the first refresh and quietly fallen back to a shared subject — a leak that
+appears hours later, in working software, with no error. `issueAuthCode` and
+`issueTokens` now refuse to run without an `ownerKey` rather than defaulting to
+one, because a default is how the constant would come back.
+
+**The cutover adopts rather than abandons.** An upgraded deployment holds rows
+keyed `'owner'` that no identity can now reach — indistinguishable from data
+loss to the person who linked them. `LEGACY_OWNER_EMAIL` names who they belong
+to, and their first sign-in re-keys them. Idempotent, and unset afterwards.
+
+**What proves it.** `npm run test:isolation` stubs the account store so that
+fetching a token for a mailbox its owner does not own *throws*, then asserts the
+owner key survives a refresh, that two callers see disjoint mailboxes, that
+naming another person's address is refused — including through the partial-match
+convenience path, which is the one that would actually have slipped — and that a
+session cookie and an MCP token cannot be used as each other. A leak fails loudly
+in the suite instead of returning plausible data in production.
+
+---
+
 ## Principles that keep applying
 
 1. **Every outward action needs an undo, and that is the condition for offering
@@ -174,7 +227,9 @@ needs permission is not a brake.
 - Deployed on **Railway**, which auto-deploys from `main`.
 - While the Google app stays in **Testing**, refresh tokens expire after 7 days
   and accounts must be re-linked. Publishing stops that, but Gmail, Drive and
-  Contacts are restricted scopes, so Google verification applies.
+  Contacts are restricted scopes, so Google verification applies — and because
+  Google data is stored server-side, so does a CASA security assessment, renewed
+  annually. That is the long pole on making this public; start it early.
 - Granted scopes are fixed at link time and Google will not extend them
   retroactively. Adding a product means re-visiting `/gmail/connect` per account;
   `list_accounts` reports which products each grant actually covers.
