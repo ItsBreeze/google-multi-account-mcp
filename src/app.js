@@ -11,11 +11,25 @@ const express   = require('express');
 const rateLimit = require('express-rate-limit');
 
 const { errorHandler } = require('./middleware/error');
+const pagesRoutes      = require('./routes/pages');
 const gmailLinkRoutes  = require('./routes/gmail_link');
 const { router: mcpRoutes, requireConfigured } = require('./routes/mcp');
 const mcpOauth = require('./services/mcp_oauth');
 
 const app = express();
+
+/**
+ * Trust exactly one proxy hop.
+ *
+ * Every managed host — Railway included — terminates TLS at a load balancer and
+ * forwards the caller's address in X-Forwarded-For. Left at the default, Express
+ * reports the balancer's address as req.ip, so the rate limiters below bucket
+ * every caller in the world together: one person hammering sign-in throttles
+ * everybody. `true` would be worse than the default, since it trusts the whole
+ * chain and lets a caller spoof their own address by sending the header; `1`
+ * trusts only the hop we actually have.
+ */
+app.set('trust proxy', 1);
 
 app.use(express.json({ limit: '1mb' }));
 
@@ -63,6 +77,11 @@ app.get('/gmail/signin',         authLimiter);
 
 app.use('/mcp',   mcpLimiter, requireConfigured, mcpRoutes);
 app.use('/gmail', requireConfigured, gmailLinkRoutes);
+
+// Public pages last among real routes: home, privacy, terms. Not behind
+// requireConfigured — a half-configured deployment should still be able to
+// say what it is.
+app.use('/', pagesRoutes);
 
 app.use((req, res) => res.status(404).json({ error: 'Route not found' }));
 app.use(errorHandler);
