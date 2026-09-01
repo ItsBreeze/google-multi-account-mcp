@@ -6,16 +6,17 @@
  * and an authorization-code grant with PKCE. That is what this implements —
  * nothing more.
  *
- * This guards the *connector*, not the mailboxes. A single operator proves
- * identity once with MCP_ADMIN_PASSWORD at the consent screen; the resulting
- * tokens carry sub='owner', which is the owner_key every mailbox row hangs off.
+ * This guards the *connector*; who is behind it comes from services/identity.
+ * The consent screen sends the caller through Google sign-in, and the identity
+ * that comes back becomes the token subject — the owner_key every mailbox row
+ * hangs off. Authorization codes and refresh tokens carry that key too, so a
+ * refresh cannot quietly come back as somebody else.
  */
 
 const crypto = require('crypto');
 const jwt    = require('jsonwebtoken');
 const pool   = require('../db/pool');
 
-const OWNER_KEY          = 'owner';
 const ACCESS_TOKEN_TTL   = '1h';
 const AUTH_CODE_TTL_MS   = 5 * 60 * 1000;
 const REFRESH_TTL_DAYS   = 90;
@@ -118,14 +119,18 @@ async function getClient(clientId) {
 
 // ─── Authorization codes ────────────────────────────────────────────────────
 
-async function issueAuthCode({ clientId, redirectUri, codeChallenge, scope }) {
+async function issueAuthCode({ clientId, redirectUri, codeChallenge, scope, ownerKey }) {
+  // Refusing here rather than defaulting is the point: a code with no owner is
+  // how a shared subject would creep back in, and it would not look like a bug.
+  if (!ownerKey) throw new Error('issueAuthCode requires an ownerKey');
+
   const code = b64url(crypto.randomBytes(32));
 
   await pool.query(
-    `INSERT INTO mcp_auth_codes (code_hash, client_id, redirect_uri, code_challenge, scope, expires_at)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
+    `INSERT INTO mcp_auth_codes (code_hash, client_id, redirect_uri, code_challenge, scope, expires_at, owner_key)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [b64url(sha256(code)), clientId, redirectUri, codeChallenge, scope || 'mcp',
-     new Date(Date.now() + AUTH_CODE_TTL_MS)],
+     new Date(Date.now() + AUTH_CODE_TTL_MS), ownerKey],
   );
 
   return code;
@@ -136,7 +141,7 @@ async function consumeAuthCode({ code, clientId, redirectUri, codeVerifier }) {
   const { rows } = await pool.query(
     `DELETE FROM mcp_auth_codes
       WHERE code_hash = $1
-      RETURNING client_id, redirect_uri, code_challenge, scope, expires_at`,
+      RETURNING client_id, redirect_uri, code_challenge, scope, expires_at, owner_key`,
     [b64url(sha256(code))],
   );
 
@@ -167,9 +172,11 @@ async function consumeAuthCode({ code, clientId, redirectUri, codeVerifier }) {
 
 // ─── Tokens ─────────────────────────────────────────────────────────────────
 
-async function issueTokens({ clientId, scope }) {
+async function issueTokens({ clientId, scope, ownerKey }) {
+  if (!ownerKey) throw new Error('issueTokens requires an ownerKey');
+
   const accessToken = jwt.sign(
-    { sub: OWNER_KEY, scope: scope || 'mcp', client_id: clientId },
+    { sub: ownerKey, scope: scope || 'mcp', client_id: clientId },
     secret(),
     { expiresIn: ACCESS_TOKEN_TTL, audience: 'mcp', issuer: baseUrl() },
   );
@@ -177,10 +184,10 @@ async function issueTokens({ clientId, scope }) {
   const refreshToken = b64url(crypto.randomBytes(32));
 
   await pool.query(
-    `INSERT INTO mcp_refresh_tokens (token_hash, client_id, scope, expires_at)
-     VALUES ($1, $2, $3, $4)`,
+    `INSERT INTO mcp_refresh_tokens (token_hash, client_id, scope, expires_at, owner_key)
+     VALUES ($1, $2, $3, $4, $5)`,
     [b64url(sha256(refreshToken)), clientId, scope || 'mcp',
-     new Date(Date.now() + REFRESH_TTL_DAYS * 86400 * 1000)],
+     new Date(Date.now() + REFRESH_TTL_DAYS * 86400 * 1000), ownerKey],
   );
 
   return {
@@ -197,7 +204,7 @@ async function redeemRefreshToken({ refreshToken, clientId }) {
   const { rows } = await pool.query(
     `DELETE FROM mcp_refresh_tokens
       WHERE token_hash = $1
-      RETURNING client_id, scope, expires_at`,
+      RETURNING client_id, scope, expires_at, owner_key`,
     [b64url(sha256(refreshToken))],
   );
 
@@ -211,42 +218,11 @@ async function redeemRefreshToken({ refreshToken, clientId }) {
     throw Object.assign(new Error('invalid_grant'), { status: 400, detail: 'client mismatch' });
   }
 
-  return issueTokens({ clientId: row.client_id, scope: row.scope });
+  return issueTokens({ clientId: row.client_id, scope: row.scope, ownerKey: row.owner_key });
 }
 
 function verifyAccessToken(token) {
   return jwt.verify(token, secret(), { audience: 'mcp', issuer: baseUrl() });
-}
-
-/**
- * Constant-time operator password check.
- * Refuses to authorize at all when MCP_ADMIN_PASSWORD is unset, rather than
- * silently leaving the connector open to anyone who finds the URL.
- */
-function checkAdminPassword(supplied) {
-  const expected = process.env.MCP_ADMIN_PASSWORD;
-  if (!expected) throw new Error('MCP_ADMIN_PASSWORD is not set — refusing to authorize');
-  if (typeof supplied !== 'string' || !supplied) return false;
-
-  // Trim both sides. Copying a passphrase out of a chat or a dashboard field
-  // routinely picks up a trailing newline or space, and a mobile keyboard can
-  // append one on its own. Surrounding whitespace carries no entropy worth
-  // defending, and rejecting it produces an "incorrect password" that no
-  // amount of careful retyping can fix.
-  const given = supplied.trim();
-  const want  = expected.trim();
-
-  if (!given || !want) return false;
-
-  const match = crypto.timingSafeEqual(sha256(given), sha256(want));
-
-  if (!match) {
-    // Lengths only — never the values. Enough to tell a wrong passphrase from
-    // a stray character in the stored variable, from the server's own logs.
-    console.warn(`[mcp_oauth] password mismatch (supplied ${given.length} chars, expected ${want.length})`);
-  }
-
-  return match;
 }
 
 /** Housekeeping for expired codes and refresh tokens. */
@@ -256,10 +232,9 @@ async function purgeExpired() {
 }
 
 module.exports = {
-  OWNER_KEY,
   protectedResourceMetadata, authorizationServerMetadata,
   registerClient, getClient,
   issueAuthCode, consumeAuthCode,
   issueTokens, redeemRefreshToken, verifyAccessToken,
-  checkAdminPassword, purgeExpired, baseUrl,
+  purgeExpired, baseUrl,
 };
