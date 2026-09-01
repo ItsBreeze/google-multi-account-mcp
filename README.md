@@ -300,8 +300,9 @@ is already proof the database was reachable at boot. The probe goes on to check
 that the app's own router is serving rather than the platform's error page, that
 `PUBLIC_BASE_URL` matches the host it is actually reachable at — the cause
 behind Google's `redirect_uri_mismatch` — that `/mcp` refuses unauthenticated
-traffic, and that `/gmail/connect` answers `401` with the sign-in prompt rather
-than serving the link form to whoever finds the URL.
+traffic, that `/gmail/connect` answers `401` with the sign-in prompt rather than
+serving the link form to whoever finds the URL, and that `/`, `/privacy` and
+`/terms` render, since Google's verification reads them.
 
 `npm run smoke` is the deeper check, against real Google data, and needs the
 deployment's `JWT_SECRET` and an owner key to mint a session with.

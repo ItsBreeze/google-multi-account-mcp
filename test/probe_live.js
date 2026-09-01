@@ -8,7 +8,8 @@
  *
  * Read-only: every request is a GET, none carries a credential, none writes.
  * It answers three questions in order — is the process listening, did the
- * database come up, and is PUBLIC_BASE_URL what this host actually is.
+ * database come up, and is PUBLIC_BASE_URL what this host actually is — then
+ * checks the public pages Google's verification reads.
  *
  * The first question answers the second for free: src/server.js calls
  * app.listen only after migrate() resolves, so anything answering at all is
@@ -117,6 +118,15 @@ async function get(path) {
     ok('/gmail/signin', 'redirects to Google');
   } else {
     bad('/gmail/signin', `expected a 302 to accounts.google.com, got HTTP ${signin.res.status}`);
+  }
+
+  // 7. The pages Google's verification reads. Not behind requireConfigured, so
+  //    these answer even on a half-configured deployment — a 404 here means
+  //    verification will fail on a deployment that otherwise looks healthy.
+  for (const path of ['/', '/privacy', '/terms']) {
+    const page = await get(path);
+    if (page.res.status === 200) ok(`${path}`, 'public page renders');
+    else bad(`${path}`, `expected 200 for Google verification, got HTTP ${page.res.status}`);
   }
 
   console.log(failed ? `\n${failed} check(s) failed.` : '\nDeployment is up and configured.');
