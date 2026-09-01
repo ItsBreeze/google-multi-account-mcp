@@ -79,7 +79,13 @@ const signInPrompt = (nextUrl, message) => page('Sign in', `
   <p>${escapeHtml(message || 'Sign in with Google to manage the accounts linked to this connector.')}</p>
   <p>This step reads nothing. It asks Google only for your identity, so the
      connector knows whose mailboxes to show you.</p>
-  <a class="btn" href="/gmail/signin?next=${encodeURIComponent(nextUrl)}">Continue with Google</a>`);
+  <a class="btn" href="/gmail/signin?next=${encodeURIComponent(nextUrl)}">Continue with Google</a>
+  <p style="margin-top:1.5rem;font-size:.85rem">If Google answers
+     <code>redirect_uri_mismatch</code>, this deployment is sending the redirect URI
+     below — add it, character for character, to your OAuth client's authorized
+     redirect URIs. It is shown here, before sign-in, precisely because that error
+     blocks signing in.</p>
+  <p><code>${escapeHtml(redirectUriInUse())}</code></p>`);
 
 // ─── Sign in / sign out ─────────────────────────────────────────────────────
 

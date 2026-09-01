@@ -11,6 +11,7 @@ const express   = require('express');
 const rateLimit = require('express-rate-limit');
 
 const { errorHandler } = require('./middleware/error');
+const pagesRoutes      = require('./routes/pages');
 const gmailLinkRoutes  = require('./routes/gmail_link');
 const { router: mcpRoutes, requireConfigured } = require('./routes/mcp');
 const mcpOauth = require('./services/mcp_oauth');
@@ -76,6 +77,11 @@ app.get('/gmail/signin',         authLimiter);
 
 app.use('/mcp',   mcpLimiter, requireConfigured, mcpRoutes);
 app.use('/gmail', requireConfigured, gmailLinkRoutes);
+
+// Public pages last among real routes: home, privacy, terms. Not behind
+// requireConfigured — a half-configured deployment should still be able to
+// say what it is.
+app.use('/', pagesRoutes);
 
 app.use((req, res) => res.status(404).json({ error: 'Route not found' }));
 app.use(errorHandler);
