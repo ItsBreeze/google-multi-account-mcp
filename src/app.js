@@ -17,6 +17,19 @@ const mcpOauth = require('./services/mcp_oauth');
 
 const app = express();
 
+/**
+ * Trust exactly one proxy hop.
+ *
+ * Every managed host — Railway included — terminates TLS at a load balancer and
+ * forwards the caller's address in X-Forwarded-For. Left at the default, Express
+ * reports the balancer's address as req.ip, so the rate limiters below bucket
+ * every caller in the world together: one person hammering sign-in throttles
+ * everybody. `true` would be worse than the default, since it trusts the whole
+ * chain and lets a caller spoof their own address by sending the header; `1`
+ * trusts only the hop we actually have.
+ */
+app.set('trust proxy', 1);
+
 app.use(express.json({ limit: '1mb' }));
 
 // Tool traffic gets a generous budget: a single Claude conversation fans out
