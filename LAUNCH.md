@@ -10,45 +10,29 @@ The service auto-deploys from `main`, gated on a `/health` healthcheck.
 
 ---
 
-## Phase A — A Google Cloud project of its own (~30 min)
+## Phase A — Publish the Work Gmail project (~5 min)
 
-The connector currently shares a project with Grounders, Radio, and Offhand Notes.
-That must end **before** verification, not after: the 100-user cap is per-project and
-lifetime (it cannot be reset), the consent-screen branding is per-project (all four
-apps show the same name and policy links), and restricted-scope verification + CASA
-applies to the whole project — the other apps would be dragged into a security
-assessment they don't need.
+**The split already happened.** The connector's OAuth client lives in its own dedicated
+Google Cloud project — **Work Gmail** (`work-gmail-507122`, project number 649628663165)
+— separate from Grounders, Radio and Offhand Notes. No new project, no client swap, no
+credential change. The 100-user lifetime cap is this project's own, and only 2 of 100
+slots are used (the two test users).
 
-1. [console.cloud.google.com](https://console.cloud.google.com) → New project, e.g.
-   `gma-connector`.
-2. **Enable five APIs** (APIs & Services → Library): Gmail API, Google Calendar API,
-   Google Drive API, People API, Google Tasks API. Miss one and Google silently drops
-   its scope at consent — the linking page will name the product it didn't get.
-3. **Consent screen** (Google Auth Platform → Branding): app name
-   `Google Multi-Account Connector`, your support email, developer contact.
-   User type **External**.
-4. **Audience → Publish to Production** immediately. Unverified-in-production shows a
-   warning screen but issues **non-expiring refresh tokens**; Testing kills them
-   every 7 days. There is no reason to sit in Testing.
-5. **Scopes** — declare what the code requests (`src/services/google_oauth.js`):
-   - `.../auth/gmail.modify` (restricted)
-   - `.../auth/calendar` (sensitive)
-   - `.../auth/drive` (restricted)
-   - `.../auth/contacts.readonly`, `.../auth/contacts.other.readonly` (sensitive)
-   - `.../auth/tasks` (sensitive)
-   - `openid`, `.../auth/userinfo.email`, `.../auth/userinfo.profile`
-6. **OAuth client** (Credentials → Create → OAuth client ID → **Web application**).
-   Authorized redirect URI, character for character:
-   `https://google-multi-account-mcp-production.up.railway.app/gmail/oauth/callback`
-   (add the custom-domain one too once Phase B is done).
-7. **Swap credentials on Railway** — service Variables:
-   `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` → the new client's values.
-8. **Re-link both accounts** at `/gmail/connect`. A new client means new grants; the
-   old tokens die with the old client. This is also what upgrades you off the 7-day
-   tokens. `/gmail/check` verifies the new credentials without a full consent trip.
+What actually remains:
 
-While in Variables, delete the two dead ones: `MCP_ADMIN_PASSWORD` (removed from the
-code) and `LEGACY_OWNER_EMAIL` (its cutover turned out to have nothing to adopt).
+1. **Branding — set the App name** (it is the one required field still empty, and it
+   blocks publishing): `Google Multi-Account Connector`. Save.
+   https://console.cloud.google.com/auth/branding?project=work-gmail-507122
+2. **Audience → Publish app.**
+   https://console.cloud.google.com/auth/audience?project=work-gmail-507122
+   A logo is already uploaded, and Google sometimes demands verification before
+   publishing when a logo is set — if the publish flow insists on verification,
+   remove the logo for now and re-add it when submitting verification in Phase C.
+3. **Re-link both accounts** at `/gmail/connect`. Publishing stops *new* tokens from
+   expiring; the currently stored ones were minted under Testing and still die
+   ~Sep 8. Two quick consent trips replace them with non-expiring grants.
+4. **Railway variables** — delete the two dead ones: `MCP_ADMIN_PASSWORD`,
+   `LEGACY_OWNER_EMAIL`.
 
 ## Phase B — Custom domain
 
@@ -59,8 +43,10 @@ have verified. `up.railway.app` is Railway's domain, not yours.
 2. Railway service → Settings → Networking → **Custom Domain** → add it; Railway
    shows the CNAME target. Create that CNAME at your DNS provider. TLS is automatic.
 3. Update `PUBLIC_BASE_URL` on the service to `https://<domain>`.
-4. Add `https://<domain>/gmail/oauth/callback` to the OAuth client's redirect URIs,
-   and the bare domain to the consent screen's authorized domains.
+4. Add `https://<domain>/gmail/oauth/callback` to the OAuth client's redirect URIs;
+   add the bare domain under Branding → Authorized domains; and fill in the home page,
+   privacy policy and terms links on the Branding page
+   (`https://<domain>/`, `/privacy`, `/terms` — already live on the deployment).
 5. Verify domain ownership in [Search Console](https://search.google.com/search-console).
 
 **Breaking side effect, by design:** `PUBLIC_BASE_URL` is the OAuth issuer for MCP
