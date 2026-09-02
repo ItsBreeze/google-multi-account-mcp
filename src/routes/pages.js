@@ -189,8 +189,12 @@ router.get('/privacy', (req, res) => {
     <li><strong>Revoke from Google's side</strong> at
         <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a> —
         stored tokens become useless immediately.</li>
-    <li><strong>Full deletion</strong> — email <a href="mailto:${escapeHtml(CONTACT)}">${escapeHtml(CONTACT)}</a>
-        and every record tied to your identity is deleted.</li>
+    <li><strong>Full deletion, self-serve</strong> — "Delete everything" on
+        <a href="/gmail/connect">/gmail/connect</a> unlinks every account (revoking each
+        grant at Google), deletes all stored tokens and every record tied to your
+        identity, and signs you out. Or email
+        <a href="mailto:${escapeHtml(CONTACT)}">${escapeHtml(CONTACT)}</a> and it is done
+        for you.</li>
     <li>Expired authorization codes and refresh tokens are purged automatically.</li>
   </ul>
 

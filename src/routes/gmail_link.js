@@ -23,6 +23,7 @@ const jwt      = require('jsonwebtoken');
 const google   = require('../services/google_oauth');
 const accounts = require('../services/gmail_accounts');
 const identity = require('../services/identity');
+const mcpOauth = require('../services/mcp_oauth');
 
 const router = express.Router();
 
@@ -129,7 +130,17 @@ const linkForm = (session, error) => page('Link a Google account', `
     <input type="email" name="login_hint" placeholder="Account to link (optional)" autocomplete="off">
     <button type="submit">Continue to Google</button>
   </form>
-  <p class="alt"><a href="/gmail/signout?next=%2Fgmail%2Fconnect">Sign out</a></p>`);
+  <p class="alt"><a href="/gmail/signout?next=%2Fgmail%2Fconnect">Sign out</a></p>
+  <details style="margin-top:2.5rem">
+    <summary style="cursor:pointer;font-size:.85rem;opacity:.6">Delete everything</summary>
+    <p style="font-size:.85rem">Unlinks every account (revoking this server's access at
+       Google), deletes the stored tokens and your identity's records here, and signs
+       you out. Nothing about you remains. Type <code>delete</code> to confirm.</p>
+    <form method="POST" action="/gmail/delete-everything">
+      <input type="text" name="confirm" placeholder="delete" autocomplete="off">
+      <button type="submit" style="background:#b91c1c">Delete everything</button>
+    </form>
+  </details>`);
 
 router.get('/connect', (req, res) => {
   const session = identity.readSession(req);
@@ -297,6 +308,37 @@ router.post('/accounts', express.urlencoded({ extended: false }), express.json()
     const session = identity.readSession(req);
     if (!session) return res.status(401).json({ error: 'unauthorized' });
     res.json({ accounts: await accounts.list(session.ownerKey) });
+  } catch (err) { next(err); }
+});
+
+/**
+ * Full self-serve deletion: every linked account (revoked at Google), every
+ * MCP credential, then the session itself. The privacy policy promises this
+ * on request; a button keeps the promise without the email round-trip.
+ */
+router.post('/delete-everything', express.urlencoded({ extended: false }), async (req, res, next) => {
+  try {
+    const session = identity.readSession(req);
+    if (!session) return res.status(401).type('html').send(signInPrompt('/gmail/connect', 'Your sign-in expired.'));
+    if ((req.body?.confirm || '').trim().toLowerCase() !== 'delete') {
+      return res.status(400).type('html').send(linkForm(session, 'Type "delete" in the confirmation box to delete everything.'));
+    }
+
+    const emails = await accounts.removeAll(session.ownerKey);
+    await mcpOauth.deleteOwnerGrants(session.ownerKey);
+    identity.clearSession(res);
+
+    res.type('html').send(page('Deleted', `
+      <h1>Everything is deleted</h1>
+      <p>${emails.length
+          ? `Unlinked and revoked: ${emails.map(e => `<code>${escapeHtml(e)}</code>`).join(', ')}.`
+          : 'There were no linked accounts.'}
+         Stored tokens are gone and you are signed out.</p>
+      <p>Connected AI assistants lose access the moment their current hour's
+         token expires. You can also revoke this server from your
+         <a href="https://myaccount.google.com/permissions">Google account permissions</a> —
+         though the grants above were already revoked from this side.</p>
+      <a class="btn" href="/gmail/connect">Start over</a>`));
   } catch (err) { next(err); }
 });
 
