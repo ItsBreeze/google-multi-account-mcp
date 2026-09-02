@@ -34,29 +34,19 @@ What actually remains:
 4. **Railway variables** — delete the two dead ones: `MCP_ADMIN_PASSWORD`,
    `LEGACY_OWNER_EMAIL`.
 
-## Phase B — Custom domain
+## Phase B — Custom domain: mcp.grounders.app (in flight, 2026-09-01)
 
-Google's verification requires the home page and policy pages on a domain you own and
-have verified. `up.railway.app` is Railway's domain, not yours.
-
-1. Pick the domain (a subdomain of one you own is fine, e.g. `mcp.example.com`).
-2. Railway service → Settings → Networking → **Custom Domain** → add it; Railway
-   shows the CNAME target. Create that CNAME at your DNS provider. TLS is automatic.
-3. Update `PUBLIC_BASE_URL` on the service to `https://<domain>`.
-4. Add `https://<domain>/gmail/oauth/callback` to the OAuth client's redirect URIs;
-   add the bare domain under Branding → Authorized domains; and fill in the home page,
-   privacy policy and terms links on the Branding page
-   (`https://<domain>/`, `/privacy`, `/terms` — already live on the deployment).
-5. Verify domain ownership in [Search Console](https://search.google.com/search-console).
-
-**Breaking side effect, by design:** `PUBLIC_BASE_URL` is the OAuth issuer for MCP
-tokens, so changing it invalidates existing connector sessions — everyone (i.e. you)
-reconnects the connector in Claude once. Linked Google accounts are untouched. Do
-Phase B before inviting anyone else, and it costs one reconnect total.
+Done: Cloudflare CNAME `mcp → dxgptehw.up.railway.app` (DNS only), redirect URI
+`https://mcp.grounders.app/gmail/oauth/callback` on the OAuth client, grounders.app
+verified in Search Console. Waiting on Railway's per-domain TLS issuance; then
+`PUBLIC_BASE_URL` flips to `https://mcp.grounders.app`, Branding links swap, and the
+operator reconnects the connector in Claude once (issuer change, by design).
 
 ## Phase C — Verification (the long pole; start it, then wait)
 
-With A + B done, submit for OAuth verification from the console. Have ready:
+With A + B done, submit from the Verification Center. VERIFICATION.md in this repo
+is the packet: per-scope justifications, Limited Use statement, demo-video shot list.
+Have ready:
 
 - Home page, privacy policy, terms — already served at `/`, `/privacy`, `/terms` on
   the custom domain. The privacy page already carries the **Limited Use disclosure**

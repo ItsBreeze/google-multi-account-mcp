@@ -71,6 +71,26 @@ async function remove(ownerKey, email) {
 }
 
 /**
+ * Delete every linked account for one owner, revoking each grant at Google.
+ * Revocation is best-effort — a grant the user already revoked from their
+ * Google account settings must not stop the local rows from going away.
+ */
+async function removeAll(ownerKey) {
+  const { rows } = await pool.query(
+    `DELETE FROM gmail_accounts
+      WHERE owner_key = $1
+      RETURNING email, refresh_token_enc`,
+    [ownerKey],
+  );
+  for (const row of rows) {
+    if (row.refresh_token_enc) {
+      try { await google.revoke(crypt.decrypt(row.refresh_token_enc)); } catch { /* already gone */ }
+    }
+  }
+  return rows.map(r => r.email);
+}
+
+/**
  * Does this account's stored grant cover `product`?
  *
  * An account linked before a product's scope existed holds a token that Google
@@ -169,4 +189,4 @@ function productAccess(scopes) {
   };
 }
 
-module.exports = { upsertFromGrant, list, remove, accessTokenFor, emailsFor, productAccess, _internal: { grantCovers } };
+module.exports = { upsertFromGrant, list, remove, removeAll, accessTokenFor, emailsFor, productAccess, _internal: { grantCovers } };

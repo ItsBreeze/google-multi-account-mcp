@@ -231,10 +231,21 @@ async function purgeExpired() {
   await pool.query('DELETE FROM mcp_refresh_tokens WHERE expires_at < NOW()');
 }
 
+/**
+ * Drop every MCP credential issued to one owner — refresh tokens and any
+ * unconsumed auth codes. Outstanding access tokens are JWTs and cannot be
+ * recalled, but they expire within an hour and the mailbox rows they pointed
+ * at are already gone by the time this runs.
+ */
+async function deleteOwnerGrants(ownerKey) {
+  await pool.query('DELETE FROM mcp_refresh_tokens WHERE owner_key = $1', [ownerKey]);
+  await pool.query('DELETE FROM mcp_auth_codes     WHERE owner_key = $1', [ownerKey]);
+}
+
 module.exports = {
   protectedResourceMetadata, authorizationServerMetadata,
   registerClient, getClient,
   issueAuthCode, consumeAuthCode,
   issueTokens, redeemRefreshToken, verifyAccessToken,
-  purgeExpired, baseUrl,
+  purgeExpired, deleteOwnerGrants, baseUrl,
 };
