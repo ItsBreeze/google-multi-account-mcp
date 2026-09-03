@@ -1,70 +1,74 @@
 # Launch runbook
 
-The connector's code is public-ready: per-user identity, tenant isolation proven in
-production, public pages served from the deployment itself (`/`, `/privacy`, `/terms`).
-What remains is Google-side and DNS-side work that only the account owner can do —
-this file is the order to do it in, and why that order.
+Status of the public launch of **Grounders MCP** — the multi-account Google connector.
+Most of the launch is done and live; what remains is Google-side verification (their
+clock) plus a couple of deferred niceties.
 
-Deployment: Railway project `pacific-prosperity` → service `google-multi-account-mcp`.
-The service auto-deploys from `main`, gated on a `/health` healthcheck.
+Deployment: Railway project `pacific-prosperity` → service `google-multi-account-mcp`,
+auto-deploys from `main`, gated on the `/health` healthcheck. Live at
+**https://mcp.grounders.app**.
 
 ---
 
-## Phase A — Publish the Work Gmail project (~5 min)
+## Done and live
 
-**The split already happened.** The connector's OAuth client lives in its own dedicated
-Google Cloud project — **Work Gmail** (`work-gmail-507122`, project number 649628663165)
-— separate from Grounders, Radio and Offhand Notes. No new project, no client swap, no
-credential change. The 100-user lifetime cap is this project's own, and only 2 of 100
-slots are used (the two test users).
+- **Per-user identity in production.** Every credential the server issues carries the
+  signed-in Google `sub` (`owner_key = google:<sub>`); users are isolated from each other.
+- **Custom domain** `mcp.grounders.app` (Railway TLS; needed a `_railway-verify.mcp` TXT
+  record for ownership — that was the one-time gotcha). `PUBLIC_BASE_URL` points here.
+  Note: `PUBLIC_BASE_URL` is the OAuth **issuer** — changing it invalidates existing
+  connector tokens and requires one reconnect in Claude.
+- **Published to Production** in the OAuth project **Work Gmail** (`work-gmail-507122`,
+  External, billing = "Grounders" account linked, 2/100 user cap). Non-expiring tokens.
+- **Identity = "Grounders MCP"**, set identically on the OAuth **consent screen** and the
+  **homepage** (`src/routes/pages.js` `APP_NAME`). These MUST match, and the name MUST NOT
+  contain "Google" or a Google product name — that's Google's App Identity policy and the
+  #1 branding-verification rejection. The green-ring logo matches the Grounders brand.
+- **One authorized domain**: `grounders.app` (Search-Console verified, covers the
+  subdomain). One redirect URI: `https://mcp.grounders.app/gmail/oauth/callback`. The old
+  `*.up.railway.app` domains/redirect were removed (Google can't verify them → they blocked
+  branding verification).
+- **Public pages** served by the app: `/`, `/privacy` (Limited Use disclosure + per-scope
+  justifications), `/terms` — all domain-agnostic via `PUBLIC_BASE_URL`.
+- **Self-serve deletion**: "Delete everything" on `/gmail/connect` revokes every grant at
+  Google, wipes stored tokens + all owner rows, and signs out. (Running it on your own live
+  connector also logs that connector out — expected; just reconnect.)
+- **Open MCP registry listing** — `io.github.ItsBreeze/grounders-mcp` (status active) at
+  `registry.modelcontextprotocol.io`. Published by `.github/workflows/publish-mcp.yml` via
+  **GitHub OIDC** (no secret) on any push to `main` that touches `server.json`. To ship a
+  new version: bump `version` in `server.json`, push. Gotchas: registry namespace casing
+  must match the GitHub username exactly (`io.github.ItsBreeze`), description ≤ 100 chars.
+  This is ecosystem/catalog presence only — it does NOT feed Claude's in-app connector search.
+- **Demo video** (unlisted): https://youtu.be/DGh_LkE8IqU. Verification packet:
+  `VERIFICATION.md` (per-scope justifications, Limited Use, shot list) — all pre-filled.
 
-What actually remains:
+## Remaining — Google verification (the long pole)
 
-1. **Branding — set the App name** (it is the one required field still empty, and it
-   blocks publishing): `Google Multi-Account Connector`. Save.
-   https://console.cloud.google.com/auth/branding?project=work-gmail-507122
-2. **Audience → Publish app.**
-   https://console.cloud.google.com/auth/audience?project=work-gmail-507122
-   A logo is already uploaded, and Google sometimes demands verification before
-   publishing when a logo is set — if the publish flow insists on verification,
-   remove the logo for now and re-add it when submitting verification in Phase C.
-3. **Re-link both accounts** at `/gmail/connect`. Publishing stops *new* tokens from
-   expiring; the currently stored ones were minted under Testing and still die
-   ~Sep 8. Two quick consent trips replace them with non-expiring grants.
-4. **Railway variables** — delete the two dead ones: `MCP_ADMIN_PASSWORD`,
-   `LEGACY_OWNER_EMAIL`.
+1. **Branding verification** — a Google-side *async* determination; there is no button for
+   it in the console. Now that the name is compliant + matches the homepage, it *can* pass
+   (before it couldn't). Watch `brisebyme@gmail.com` and the
+   [Verification Center](https://console.cloud.google.com/auth/verification?project=work-gmail-507122):
+   when branding verifies, **"Prepare for verification" enables**.
+2. **Submit data-access verification** — click "Prepare for verification" and submit; all
+   answers (scopes, justifications, demo video) are already saved. Sensitive scopes:
+   calendar, contacts.readonly, contacts.other.readonly, tasks. Restricted: gmail.modify, drive.
+3. **CASA Tier 2** — Google's follow-up because the app stores restricted-scope tokens on a
+   server. Third-party assessor, renewed annually; the follow-up email names the labs.
+   Until verification completes, the app runs published-but-unverified (100-user cap, users
+   see the "unverified app" interstitial) — which is fine to operate in.
 
-## Phase B — Custom domain: mcp.grounders.app (in flight, 2026-09-01)
+## Deferred / not doing
 
-Done: Cloudflare CNAME `mcp → dxgptehw.up.railway.app` (DNS only), redirect URI
-`https://mcp.grounders.app/gmail/oauth/callback` on the OAuth client, grounders.app
-verified in Search Console. Waiting on Railway's per-domain TLS issuance; then
-`PUBLIC_BASE_URL` flips to `https://mcp.grounders.app`, Branding links swap, and the
-operator reconnects the connector in Claude once (issuer change, by design).
+- **DB backups** — deferred by choice. Railway Hobby blocks scheduled volume backups; set up
+  `pg_dump` → R2 (or move to Pro) before real external users rely on it.
+- **Anthropic in-app Connectors Directory** — requires a paid Team/Enterprise org where you're
+  Owner; skipped. The connector's tools also currently declare no annotations
+  (`title`/`readOnlyHint`/`destructiveHint`), which that directory would require.
 
-## Phase C — Verification (the long pole; start it, then wait)
+## Operational notes
 
-With A + B done, submit from the Verification Center. VERIFICATION.md in this repo
-is the packet: per-scope justifications, Limited Use statement, demo-video shot list.
-Have ready:
-
-- Home page, privacy policy, terms — already served at `/`, `/privacy`, `/terms` on
-  the custom domain. The privacy page already carries the **Limited Use disclosure**
-  and per-scope justifications reviewers look for.
-- A short screen-recording (YouTube, unlisted is fine) showing the OAuth flow and
-  each scope in use — Google asks for this for sensitive/restricted scopes.
-- Per-scope written justifications: crib them from the `/privacy` table.
-
-Because the app stores restricted-scope data (Google tokens) on a server, Google will
-then require a **CASA security assessment** (Tier 2, third-party assessor, renewed
-annually). Weeks of calendar time and real money — start it as soon as verification
-asks, and expect to launch to the 100-user unverified cap in the meantime.
-
-## Already done (don't redo)
-
-- Per-user identity; `MCP_ADMIN_PASSWORD` retired; isolation verified live.
-- `trust proxy` set; per-IP rate limits actually per-IP behind Railway.
-- Healthcheck gates deploys; a failing boot can't replace a serving container.
-- Public pages live and domain-agnostic (they render whatever `PUBLIC_BASE_URL` says).
-- Sign-in page shows the deployment's redirect URI pre-auth, so a
-  `redirect_uri_mismatch` is self-diagnosing.
+- Google's Auth Platform console is flaky under browser automation (screenshots time out
+  mid-render); read state via page text / JS rather than screenshots. Dark-theme form fields
+  render values invisibly but persist — verify by reading the input value after reload.
+- Railway API mutations sometimes return "Not Authorized" (token lapse) — use the Railway web
+  UI for variable/billing changes when that happens.
