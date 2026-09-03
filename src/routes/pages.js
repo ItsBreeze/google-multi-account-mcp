@@ -18,7 +18,7 @@ const google  = require('../services/google_oauth');
 
 const router = express.Router();
 
-const APP_NAME = 'Google Multi-Account Connector';
+const APP_NAME = 'Grounders MCP';
 const CONTACT  = (process.env.SUPPORT_EMAIL || 'brisebyme@gmail.com').trim();
 const UPDATED  = 'September 1, 2026';
 
