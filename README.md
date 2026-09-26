@@ -9,7 +9,7 @@ fans out across all of them in a single call.
 You run it yourself. It holds your Google tokens in your own database, encrypted,
 and talks to Google directly — nothing passes through a third party.
 
-Node and Postgres, four tables, and no dependencies beyond Express, `pg` and
+Node and Postgres, five tables, and no dependencies beyond Express, `pg` and
 `jsonwebtoken`. Document text extraction — PDF, Word, Excel, PowerPoint,
 OpenDocument — uses only Node's standard library.
 
@@ -25,7 +25,7 @@ git clone https://github.com/ItsBreeze/google-multi-account-mcp.git
 cd google-multi-account-mcp
 npm install
 cp .env.example .env      # fill it in — see Setup below
-npm run migrate           # creates the four tables
+npm run migrate           # creates the five tables
 npm start
 ```
 
@@ -267,13 +267,17 @@ deployment needs only environment variables.
 
 | Variable | Notes |
 |---|---|
-| `DATABASE_URL` | Postgres. The four tables create themselves on first boot |
+| `DATABASE_URL` | Postgres. The five tables create themselves on first boot |
 | `PUBLIC_BASE_URL` | The public origin, scheme and host only, no trailing slash. Becomes the OAuth issuer and the Google redirect URI, so it must match what Google has registered |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | From the Web application OAuth client |
 | `TOKEN_ENC_KEY` | 32 bytes, base64. Encrypts Google tokens at rest. **Losing or changing it makes every stored token undecryptable** |
 | `JWT_SECRET` | Any long random string; signs MCP tokens and browser sessions via two separately derived keys. Changing it only forces everyone to authenticate again |
 | `LEGACY_OWNER_EMAIL` | Optional, one-time. Adopts mailboxes linked before per-user sign-in existed, on that address's first sign-in |
 | `PORT` | Optional, defaults to 3000. Most platforms set this for you |
+| `STRIPE_SECRET_KEY` / `STRIPE_PRICE_ID` | Optional. Set both to charge a subscription for tool calls (sign-in, linking and deletion stay free). Unset, billing is off entirely |
+| `STRIPE_WEBHOOK_SECRET` | Signing secret for the `<PUBLIC_BASE_URL>/billing/webhook` endpoint (events: `checkout.session.completed`, `customer.subscription.*`) |
+| `BILLING_PRICE_LABEL` | Price text on the public pages, default `$0.99/month` — keep it matching the Stripe price |
+| `BILLING_EXEMPT_EMAILS` | Comma-separated. Whoever has linked one of these mailboxes never pays |
 
 `/gmail/check` diagnoses a bad Google client without running the whole consent
 round-trip, and reports which of the two variables Google rejected. Values are
@@ -302,7 +306,7 @@ re-linking:
 
 An OAuth client accepts several redirect URIs, so **add** the new deployment's
 callback rather than replacing the old one. Both deployments can then run side
-by side against the same database — nothing else writes those four tables —
+by side against the same database — nothing else writes those five tables —
 which leaves room to verify the new one before retiring the old.
 
 Expect Claude to authenticate once more afterwards if `JWT_SECRET` changed.

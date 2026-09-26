@@ -15,6 +15,7 @@ const express  = require('express');
 const oauth    = require('../services/mcp_oauth');
 const identity = require('../services/identity');
 const tools    = require('../mcp/tools');
+const billing  = require('../services/billing');
 
 const router = express.Router();
 
@@ -270,6 +271,16 @@ async function handleRpc(message, ownerKey) {
       return reply({ tools: tools.descriptors() });
 
     case 'tools/call': {
+      // Listing stays open so the connector installs and shows what it does;
+      // calling is what the subscription pays for.
+      if (!await billing.isEntitled(ownerKey)) {
+        return reply({
+          content: [{ type: 'text', text:
+            `This connector needs a subscription (${billing.priceLabel()}). ` +
+            `Tell the user to subscribe at ${oauth.baseUrl()}/billing, then try again.` }],
+          isError: true,
+        });
+      }
       try {
         const result = await tools.callTool(params?.name, params?.arguments, ownerKey);
         return reply(result);

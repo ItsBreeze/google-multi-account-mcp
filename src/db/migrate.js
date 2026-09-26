@@ -1,6 +1,6 @@
 /**
  * Idempotent schema. Safe to run on every boot, and that is how server.js
- * uses it — four tables, no migration framework, no ordering to get wrong.
+ * uses it — five tables, no migration framework, no ordering to get wrong.
  */
 
 const pool = require('./pool');
@@ -70,6 +70,18 @@ ALTER TABLE mcp_auth_codes     ADD COLUMN IF NOT EXISTS owner_key TEXT NOT NULL 
 ALTER TABLE mcp_refresh_tokens ADD COLUMN IF NOT EXISTS owner_key TEXT NOT NULL DEFAULT 'owner';
 
 CREATE INDEX IF NOT EXISTS idx_mcp_refresh_tokens_owner ON mcp_refresh_tokens(owner_key);
+
+-- One Stripe subscription per identity (services/billing). status mirrors
+-- Stripe's subscription status, plus 'comp' for access granted by hand.
+CREATE TABLE IF NOT EXISTS billing (
+  owner_key              TEXT        PRIMARY KEY,
+  email                  TEXT,
+  stripe_customer_id     TEXT,
+  stripe_subscription_id TEXT,
+  status                 TEXT        NOT NULL,
+  current_period_end     TIMESTAMPTZ,
+  updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 `;
 
 async function migrate() {

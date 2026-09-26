@@ -24,6 +24,7 @@ const google   = require('../services/google_oauth');
 const accounts = require('../services/gmail_accounts');
 const identity = require('../services/identity');
 const mcpOauth = require('../services/mcp_oauth');
+const billing  = require('../services/billing');
 
 const router = express.Router();
 
@@ -130,11 +131,11 @@ const linkForm = (session, error) => page('Link a Google account', `
     <input type="email" name="login_hint" placeholder="Account to link (optional)" autocomplete="off">
     <button type="submit">Continue to Google</button>
   </form>
-  <p class="alt"><a href="/gmail/signout?next=%2Fgmail%2Fconnect">Sign out</a></p>
+  <p class="alt">${billing.enabled() ? '<a href="/billing">Subscription</a> · ' : ''}<a href="/gmail/signout?next=%2Fgmail%2Fconnect">Sign out</a></p>
   <details style="margin-top:2.5rem">
     <summary style="cursor:pointer;font-size:.85rem;opacity:.6">Delete everything</summary>
     <p style="font-size:.85rem">Unlinks every account (revoking this server's access at
-       Google), deletes the stored tokens and your identity's records here, and signs
+       Google), cancels any subscription, deletes the stored tokens and your identity's records here, and signs
        you out. Nothing about you remains. Type <code>delete</code> to confirm.</p>
     <form method="POST" action="/gmail/delete-everything">
       <input type="text" name="confirm" placeholder="delete" autocomplete="off">
@@ -326,6 +327,7 @@ router.post('/delete-everything', express.urlencoded({ extended: false }), async
 
     const emails = await accounts.removeAll(session.ownerKey);
     await mcpOauth.deleteOwnerGrants(session.ownerKey);
+    await billing.cancelAndForget(session.ownerKey);
     identity.clearSession(res);
 
     res.type('html').send(page('Deleted', `
@@ -333,7 +335,7 @@ router.post('/delete-everything', express.urlencoded({ extended: false }), async
       <p>${emails.length
           ? `Unlinked and revoked: ${emails.map(e => `<code>${escapeHtml(e)}</code>`).join(', ')}.`
           : 'There were no linked accounts.'}
-         Stored tokens are gone and you are signed out.</p>
+         Stored tokens are gone, any subscription is cancelled, and you are signed out.</p>
       <p>Connected AI assistants lose access the moment their current hour's
          token expires. You can also revoke this server from your
          <a href="https://myaccount.google.com/permissions">Google account permissions</a> —
