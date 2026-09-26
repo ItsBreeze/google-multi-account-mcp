@@ -1,12 +1,12 @@
 # Launch runbook
 
-Status of the public launch of **Grounders MCP** — the multi-account Google connector.
+Status of the public launch of **Hub** — the multi-account Google connector.
 Most of the launch is done and live; what remains is Google-side verification (their
 clock) plus a couple of deferred niceties.
 
 Deployment: Railway project `pacific-prosperity` → service `google-multi-account-mcp`,
 auto-deploys from `main`, gated on the `/health` healthcheck. Live at
-**https://mcp.grounders.app**.
+**https://hub.grounders.app**.
 
 ---
 
@@ -14,18 +14,18 @@ auto-deploys from `main`, gated on the `/health` healthcheck. Live at
 
 - **Per-user identity in production.** Every credential the server issues carries the
   signed-in Google `sub` (`owner_key = google:<sub>`); users are isolated from each other.
-- **Custom domain** `mcp.grounders.app` (Railway TLS; needed a `_railway-verify.mcp` TXT
+- **Custom domain** `hub.grounders.app` (Railway TLS; needed a `_railway-verify.hub` TXT
   record for ownership — that was the one-time gotcha). `PUBLIC_BASE_URL` points here.
   Note: `PUBLIC_BASE_URL` is the OAuth **issuer** — changing it invalidates existing
   connector tokens and requires one reconnect in Claude.
 - **Published to Production** in the OAuth project **Work Gmail** (`work-gmail-507122`,
   External, billing = "Grounders" account linked, 2/100 user cap). Non-expiring tokens.
-- **Identity = "Grounders MCP"**, set identically on the OAuth **consent screen** and the
+- **Identity = "Hub"**, set identically on the OAuth **consent screen** and the
   **homepage** (`src/routes/pages.js` `APP_NAME`). These MUST match, and the name MUST NOT
   contain "Google" or a Google product name — that's Google's App Identity policy and the
   #1 branding-verification rejection. The green-ring logo matches the Grounders brand.
 - **One authorized domain**: `grounders.app` (Search-Console verified, covers the
-  subdomain). One redirect URI: `https://mcp.grounders.app/gmail/oauth/callback`. The old
+  subdomain). One redirect URI: `https://hub.grounders.app/gmail/oauth/callback`. The old
   `*.up.railway.app` domains/redirect were removed (Google can't verify them → they blocked
   branding verification).
 - **Public pages** served by the app: `/`, `/privacy` (Limited Use disclosure + per-scope
@@ -33,7 +33,7 @@ auto-deploys from `main`, gated on the `/health` healthcheck. Live at
 - **Self-serve deletion**: "Delete everything" on `/gmail/connect` revokes every grant at
   Google, wipes stored tokens + all owner rows, and signs out. (Running it on your own live
   connector also logs that connector out — expected; just reconnect.)
-- **Open MCP registry listing** — `io.github.ItsBreeze/grounders-mcp` (status active) at
+- **Open MCP registry listing** — `io.github.ItsBreeze/hub` (status active) at
   `registry.modelcontextprotocol.io`. Published by `.github/workflows/publish-mcp.yml` via
   **GitHub OIDC** (no secret) on any push to `main` that touches `server.json`. To ship a
   new version: bump `version` in `server.json`, push. Gotchas: registry namespace casing

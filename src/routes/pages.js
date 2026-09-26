@@ -18,7 +18,10 @@ const google  = require('../services/google_oauth');
 
 const router = express.Router();
 
-const APP_NAME = 'Grounders MCP';
+// The consent-screen logo, served from the app so it lives on the same origin as the name.
+router.get('/logo.png', (req, res) => res.sendFile(require('path').join(__dirname, '../../public/logo.png')));
+
+const APP_NAME = 'Hub';
 const CONTACT  = (process.env.SUPPORT_EMAIL || 'brisebyme@gmail.com').trim();
 const UPDATED  = 'September 1, 2026';
 
@@ -59,6 +62,7 @@ ${inner}
 
 router.get('/', (req, res) => {
   res.type('html').send(page(APP_NAME, `
+  <img src="/logo.png" alt="" width="72" height="72" style="border-radius:16px;display:block;margin-bottom:1rem">
   <h1>${APP_NAME}</h1>
   <p class="sub">Several Google accounts in one Claude connector.</p>
 

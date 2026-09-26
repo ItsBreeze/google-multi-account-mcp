@@ -1,4 +1,4 @@
-# Google Multi-Account Connector
+# Hub — a multi-account Google connector for Claude
 
 A remote [MCP](https://modelcontextprotocol.io) server that gives Claude access to
 **several Google accounts at once** — Gmail, Calendar, Drive, Contacts and Tasks.

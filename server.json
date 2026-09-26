@@ -1,9 +1,9 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.ItsBreeze/grounders-mcp",
-  "title": "Grounders MCP",
+  "name": "io.github.ItsBreeze/hub",
+  "title": "Hub",
   "description": "Multiple Google accounts (Gmail, Calendar, Drive, Contacts, Tasks) in one Claude connector.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "repository": {
     "url": "https://github.com/ItsBreeze/google-multi-account-mcp",
     "source": "github"
@@ -11,7 +11,7 @@
   "remotes": [
     {
       "type": "streamable-http",
-      "url": "https://mcp.grounders.app/mcp"
+      "url": "https://hub.grounders.app/mcp"
     }
   ]
 }
