@@ -42,6 +42,16 @@ auto-deploys from `main`, gated on the `/health` healthcheck. Live at
 - **Demo video** (unlisted): https://youtu.be/DGh_LkE8IqU. Verification packet:
   `VERIFICATION.md` (per-scope justifications, Limited Use, shot list) — all pre-filled.
 
+## Billing (99¢/month)
+
+Stripe subscription gating `tools/call` only (`src/services/billing.js`, `/billing`).
+Off until `STRIPE_SECRET_KEY` + `STRIPE_PRICE_ID` are set on Railway. To turn on:
+create a recurring $0.99/month price, add the webhook endpoint
+`https://mcp.grounders.app/billing/webhook` (events `checkout.session.completed`,
+`customer.subscription.created|updated|deleted`), enable the customer portal, then set
+`STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`, `STRIPE_WEBHOOK_SECRET` and
+`BILLING_EXEMPT_EMAILS=brisebyme@gmail.com`.
+
 ## Remaining — Google verification (the long pole)
 
 1. **Branding verification** — a Google-side *async* determination; there is no button for
@@ -62,8 +72,8 @@ auto-deploys from `main`, gated on the `/health` healthcheck. Live at
 - **DB backups** — deferred by choice. Railway Hobby blocks scheduled volume backups; set up
   `pg_dump` → R2 (or move to Pro) before real external users rely on it.
 - **Anthropic in-app Connectors Directory** — requires a paid Team/Enterprise org where you're
-  Owner; skipped. The connector's tools also currently declare no annotations
-  (`title`/`readOnlyHint`/`destructiveHint`), which that directory would require.
+  Owner; skipped. Tool annotations (`title`/`readOnlyHint`/`destructiveHint`) are now declared,
+  so that requirement is met.
 
 ## Operational notes
 
