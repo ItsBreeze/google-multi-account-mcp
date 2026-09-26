@@ -18,9 +18,14 @@ const google  = require('../services/google_oauth');
 
 const router = express.Router();
 
-const APP_NAME = 'Grounders MCP';
+// The consent-screen logo, served from the app so it lives on the same origin as the name.
+router.get('/logo.png', (req, res) => res.sendFile(require('path').join(__dirname, '../../public/logo.png')));
+
+const APP_NAME = 'Hub';
 const CONTACT  = (process.env.SUPPORT_EMAIL || 'brisebyme@gmail.com').trim();
-const UPDATED  = 'September 1, 2026';
+const UPDATED  = 'September 25, 2026';
+
+const billing = require('../services/billing');
 
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g,
   c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -59,6 +64,7 @@ ${inner}
 
 router.get('/', (req, res) => {
   res.type('html').send(page(APP_NAME, `
+  <img src="/logo.png" alt="" width="72" height="72" style="border-radius:16px;display:block;margin-bottom:1rem">
   <h1>${APP_NAME}</h1>
   <p class="sub">Several Google accounts in one Claude connector.</p>
 
@@ -84,7 +90,12 @@ router.get('/', (req, res) => {
      link are reachable by you and nobody else — every credential this server issues
      carries your identity, and every request is scoped to it.</p>
 
-  <h2>Connect it</h2>
+  ${billing.enabled() ? `<h2>Price</h2>
+  <p>${escapeHtml(billing.priceLabel())}, for every account you link. Signing in and linking
+     are free, so you can see your accounts connected before paying; Claude's tool calls
+     need the subscription. Cancel any time. <a href="/billing">Subscribe</a></p>
+
+  ` : ''}<h2>Connect it</h2>
   <p>In Claude: Settings → Connectors → Add custom connector, with this URL:</p>
   <p><code>${escapeHtml(google.normalizeBaseUrl(process.env.PUBLIC_BASE_URL) || 'https://<your-deployment>')}/mcp</code></p>
   <a class="btn" href="/gmail/connect">Link a Google account</a>
@@ -121,6 +132,9 @@ router.get('/privacy', (req, res) => {
         registers, and authorization codes and refresh tokens it is issued. Codes and
         tokens are stored as one-way hashes; codes are single-use and expire in five
         minutes, refresh tokens rotate on every use.</li>
+    <li><strong>Subscription status</strong> — if you subscribe, your Stripe customer and
+        subscription IDs, the subscription's status and renewal date. Card details go
+        to Stripe directly and never reach this service.</li>
   </ul>
 
   <h2>What we never store</h2>
@@ -167,6 +181,8 @@ router.get('/privacy', (req, res) => {
     <li><strong>Your AI assistant</strong> — results are returned to the MCP client
         (for example, Claude) that made the request under your credentials. What that
         assistant retains is governed by its own privacy policy.</li>
+    <li><strong>Stripe</strong> — if you subscribe, Stripe processes the payment and
+        receives your sign-in email address. It receives no Google user data.</li>
     <li><strong>Nobody else.</strong> There are no analytics, no advertising partners,
         and no sale or sharing of data.</li>
   </ul>
@@ -228,7 +244,14 @@ router.get('/terms', (req, res) => {
         account settings, at any time.</li>
   </ul>
 
-  <h2>Acceptable use</h2>
+  ${billing.enabled() ? `<h2>Subscription</h2>
+  <p>Tool access costs ${escapeHtml(billing.priceLabel())}, billed through Stripe and
+     renewing automatically until cancelled. Cancel any time at <a href="/billing">/billing</a>;
+     access continues to the end of the period already paid for. "Delete everything"
+     also cancels the subscription. Prices may change with at least 30 days' notice by
+     email. Payments are not refunded except where required by law.</p>
+
+  ` : ''}<h2>Acceptable use</h2>
   <p>Do not use the service to send spam, to access accounts without authorization,
      or in violation of Google's terms or applicable law. Access may be suspended for
      abuse.</p>

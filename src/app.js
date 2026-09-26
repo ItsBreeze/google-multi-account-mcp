@@ -14,6 +14,7 @@ const { errorHandler } = require('./middleware/error');
 const pagesRoutes      = require('./routes/pages');
 const gmailLinkRoutes  = require('./routes/gmail_link');
 const { router: mcpRoutes, requireConfigured } = require('./routes/mcp');
+const billingRoutes    = require('./routes/billing');
 const mcpOauth = require('./services/mcp_oauth');
 
 const app = express();
@@ -30,6 +31,10 @@ const app = express();
  * trusts only the hop we actually have.
  */
 app.set('trust proxy', 1);
+
+// Stripe signs the raw request bytes, so its webhook must see them before
+// express.json() consumes the body.
+app.post('/billing/webhook', billingRoutes.webhook);
 
 app.use(express.json({ limit: '1mb' }));
 
@@ -77,6 +82,7 @@ app.get('/gmail/signin',         authLimiter);
 
 app.use('/mcp',   mcpLimiter, requireConfigured, mcpRoutes);
 app.use('/gmail', requireConfigured, gmailLinkRoutes);
+app.use('/billing', authLimiter, requireConfigured, billingRoutes.router);
 
 // Public pages last among real routes: home, privacy, terms. Not behind
 // requireConfigured — a half-configured deployment should still be able to

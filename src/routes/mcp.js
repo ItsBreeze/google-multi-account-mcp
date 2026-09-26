@@ -15,12 +15,13 @@ const express  = require('express');
 const oauth    = require('../services/mcp_oauth');
 const identity = require('../services/identity');
 const tools    = require('../mcp/tools');
+const billing  = require('../services/billing');
 
 const router = express.Router();
 
 // Spec revisions this server can speak, newest first.
 const SUPPORTED_PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
-const SERVER_INFO = { name: 'google-multi-account-mcp', version: '1.0.0' };
+const SERVER_INFO = { name: 'hub', version: '1.1.0' };
 
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g,
   c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -101,7 +102,7 @@ function consentPage({ params, session, error, nextUrl }) {
   return `<!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Authorize Gmail connector</title>
+<title>Authorize Hub</title>
 <style>
   :root { color-scheme: light dark; }
   body { font: 16px/1.5 -apple-system, system-ui, sans-serif; margin: 0;
@@ -117,8 +118,8 @@ function consentPage({ params, session, error, nextUrl }) {
   .alt { margin-top: 1rem; font-size: .85rem; text-align: center; }
 </style></head>
 <body><div class="card">
-  <h1>Authorize Gmail connector</h1>
-  <p>Claude is asking to connect to your multi-account Gmail server.</p>
+  <h1>Authorize Hub</h1>
+  <p>Claude is asking to connect to Hub, which holds the Google accounts you link.</p>
   ${error ? `<div class="err">${escapeHtml(error)}</div>` : ''}
   ${action}
 </div></body></html>`;
@@ -270,6 +271,16 @@ async function handleRpc(message, ownerKey) {
       return reply({ tools: tools.descriptors() });
 
     case 'tools/call': {
+      // Listing stays open so the connector installs and shows what it does;
+      // calling is what the subscription pays for.
+      if (!await billing.isEntitled(ownerKey)) {
+        return reply({
+          content: [{ type: 'text', text:
+            `This connector needs a subscription (${billing.priceLabel()}). ` +
+            `Tell the user to subscribe at ${oauth.baseUrl()}/billing, then try again.` }],
+          isError: true,
+        });
+      }
       try {
         const result = await tools.callTool(params?.name, params?.arguments, ownerKey);
         return reply(result);

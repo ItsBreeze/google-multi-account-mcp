@@ -42,7 +42,7 @@ function describe(err) {
 
 prepare()
   .then(() => {
-    app.listen(PORT, () => console.log(`Google Multi-Account Connector listening on ${PORT}`));
+    app.listen(PORT, () => console.log(`Hub listening on ${PORT}`));
   })
   .catch((err) => {
     console.error('Could not prepare the database:', describe(err));

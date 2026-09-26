@@ -3,7 +3,7 @@
 Everything the Google verification submission asks for, pre-written. Submit from
 [Verification Center](https://console.cloud.google.com/auth/verification?project=work-gmail-507122)
 in the Work Gmail project (`work-gmail-507122`) — **after** the domain cutover to
-`mcp.grounders.app`, so the consent-screen links reviewers click are the final ones.
+`hub.grounders.app`, so the consent-screen links reviewers click are the final ones.
 
 Prerequisites already met: `grounders.app` verified in Search Console (2026-09-01,
 brisebyme@gmail.com); home/privacy/terms live; app published to Production.
@@ -74,7 +74,7 @@ only encrypted OAuth tokens are stored.
 
 Record one continuous screen capture, English narration or on-screen captions:
 
-1. **Consent flow (the part they scrutinize):** open `https://mcp.grounders.app/gmail/connect`
+1. **Consent flow (the part they scrutinize):** open `https://hub.grounders.app/gmail/connect`
    → sign in with Google → Continue to Google → show the account chooser, the
    consent screen with the app name and scope list, approve → land on the
    "Linked" page. Show the Privacy Policy link on the consent screen briefly.
