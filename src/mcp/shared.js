@@ -7,16 +7,18 @@
  * first-party connectors hold exactly one Google account each.
  */
 
-const accounts = require('../services/gmail_accounts');
+const accounts     = require('../services/gmail_accounts');
+const imapAccounts = require('../services/imap_accounts');
+const providers    = require('../services/imap_providers');
+const gmailApi     = require('../services/gmail_api');
+const imapApi      = require('../services/imap_api');
 
 const text = (value) => ({
   content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }],
 });
 
-/** Resolve the caller's `account` argument to a linked address, with a helpful error. */
-async function resolveAccount(ownerKey, requested) {
-  const linked = await accounts.emailsFor(ownerKey);
-
+/** Pick one address out of a linked list from what the caller said. */
+function pick(linked, requested) {
   if (!linked.length) {
     throw new Error('No accounts are linked yet. Visit /gmail/connect to link one.');
   }
@@ -37,6 +39,107 @@ async function resolveAccount(ownerKey, requested) {
   if (partial.length > 1) throw new Error(`"${requested}" matches ${partial.join(', ')} — be specific.`);
 
   throw new Error(`"${requested}" is not linked. Linked: ${linked.join(', ')}`);
+}
+
+/**
+ * Explain a Google-only miss that is really an IMAP mailbox, rather than
+ * calling a linked address "not linked". Returns null when it is not one.
+ */
+async function mailOnlyHint(ownerKey, requested, googleLinked) {
+  // Best-effort: a hint that cannot be computed must not replace the real error.
+  let mail;
+  try { mail = await imapAccounts.emailsFor(ownerKey); } catch { return null; }
+  if (!mail.length) return null;
+
+  const wanted = String(requested || '').toLowerCase().trim();
+  const hits = requested
+    ? mail.filter(m => m.email === wanted || m.email.startsWith(`${wanted}@`) || m.email.includes(wanted))
+    : mail;
+  if (requested && !hits.length) return null;
+
+  const named = hits.map(m => `${m.email} (${providers.preset(m.provider).name})`).join(', ');
+  return new Error(
+    `${named} ${hits.length > 1 ? 'are mailboxes' : 'is a mailbox'} with mail only — Calendar, Drive, Contacts and ` +
+    `Tasks need a Google account. ${googleLinked.length ? `Google accounts: ${googleLinked.join(', ')}` :
+      'No Google account is linked; link one at /gmail/connect.'}`,
+  );
+}
+
+/** Resolve the caller's `account` argument to a linked Google address, with a helpful error. */
+async function resolveAccount(ownerKey, requested) {
+  const linked = await accounts.emailsFor(ownerKey);
+  try {
+    return pick(linked, requested);
+  } catch (err) {
+    if (!linked.length || requested) {
+      const hint = await mailOnlyHint(ownerKey, requested, linked);
+      if (hint) throw hint;
+    }
+    throw err;
+  }
+}
+
+// ─── Mail: Gmail and IMAP mailboxes behind one interface ────────────────────
+
+/**
+ * Every linked mailbox, Google and IMAP. An address linked both ways (a
+ * Google account whose login is an AOL address has no Gmail mailbox) is the
+ * IMAP one for mail.
+ */
+async function mailboxesFor(ownerKey) {
+  const [google, imap] = await Promise.all([accounts.emailsFor(ownerKey), imapAccounts.emailsFor(ownerKey)]);
+  const viaImap = new Set(imap.map(m => m.email));
+  return [
+    ...google.filter(email => !viaImap.has(email)).map(email => ({ email, provider: 'gmail' })),
+    ...imap,
+  ].sort((a, b) => a.email.localeCompare(b.email));
+}
+
+/** The client and its credential for one mailbox — an access token for Gmail, a login for IMAP. */
+async function clientFor(ownerKey, box) {
+  if (box.provider === 'gmail') {
+    return { email: box.email, provider: 'gmail', api: gmailApi,
+             handle: await accounts.accessTokenFor(ownerKey, box.email, 'gmail') };
+  }
+  return { email: box.email, provider: box.provider, api: imapApi,
+           handle: await imapAccounts.credentialsFor(ownerKey, box.email) };
+}
+
+/** Resolve `account` across every mailbox and return its client — every mail tool starts this way. */
+async function mailFor(ownerKey, requested) {
+  const boxes = await mailboxesFor(ownerKey);
+  const email = pick(boxes.map(b => b.email), requested);
+  return clientFor(ownerKey, boxes.find(b => b.email === email));
+}
+
+/** The provider's display name, for messages that point the user at their mail app. */
+const providerName = (provider) => (provider === 'gmail' ? 'Gmail' : providers.preset(provider).name);
+
+/**
+ * fanOut for mail: one mailbox, or every Gmail and IMAP mailbox when none is
+ * named. perAccount receives (api, handle, email).
+ */
+async function fanOutMail(ownerKey, account, perAccount) {
+  const boxes   = await mailboxesFor(ownerKey);
+  const targets = account
+    ? [boxes.find(b => b.email === pick(boxes.map(x => x.email), account))]
+    : boxes;
+
+  if (!targets.length) throw new Error('No accounts are linked yet. Visit /gmail/connect to link one.');
+
+  const settled = await Promise.allSettled(targets.map(async (box) => {
+    const { api, handle } = await clientFor(ownerKey, box);
+    return { email: box.email, value: await perAccount(api, handle, box.email) };
+  }));
+
+  const ok     = [];
+  const failed = [];
+  settled.forEach((result, i) => {
+    if (result.status === 'fulfilled') ok.push(result.value);
+    else failed.push(`${targets[i].email}: ${result.reason.message}`);
+  });
+
+  return { targets: targets.map(b => b.email), ok, failed };
 }
 
 /**
@@ -61,7 +164,10 @@ async function fanOut(ownerKey, account, product, perAccount) {
 
   // Hard error, not an empty result: "no matches" and "nothing was searched"
   // must never look the same to the model.
-  if (!targets.length) throw new Error('No accounts are linked yet. Visit /gmail/connect to link one.');
+  if (!targets.length) {
+    throw (await mailOnlyHint(ownerKey, undefined, []))
+      || new Error('No accounts are linked yet. Visit /gmail/connect to link one.');
+  }
 
   const settled = await Promise.allSettled(targets.map(async (email) => ({
     email,
@@ -132,5 +238,6 @@ function checkPageToken(args) {
 
 module.exports = {
   text, resolveAccount, tokenFor, fanOut, mergeSearch, oneTarget,
+  mailboxesFor, mailFor, fanOutMail, providerName, pick,
   ACCOUNT_PROP, SEARCH_PROPS, checkPageToken,
 };

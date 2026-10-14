@@ -276,6 +276,17 @@ async function getAttachmentData(accessToken, messageId, attachmentId) {
   return Buffer.from(res.data, 'base64url');
 }
 
+/**
+ * One attachment's bytes plus what it is. The type is looked up from the
+ * message, so the caller does not have to pass it.
+ */
+async function getAttachment(accessToken, messageId, attachmentId) {
+  const data = await getAttachmentData(accessToken, messageId, attachmentId);
+  const msg  = await getMessage(accessToken, messageId);
+  const meta = msg.attachments.find(a => a.attachment_id === attachmentId) || {};
+  return { data, filename: meta.filename, mime_type: meta.mime_type };
+}
+
 // ─── MIME construction ──────────────────────────────────────────────────────
 
 /** RFC 2047 encode a header value only when it needs it. */
@@ -288,12 +299,17 @@ function encodeHeader(value) {
 const wrap76 = (b64) => b64.replace(/(.{76})/g, '$1\r\n');
 
 /**
- * Build a raw RFC 5322 message, base64url-encoded for the Gmail API.
+ * Build a raw RFC 5322 message as a string.
  * With `attachments` ([{filename, mimeType, data:Buffer}]) it produces
  * multipart/mixed; without, a simple text/plain message.
+ *
+ * `date` and `messageId` are for transports that do not stamp them — the Gmail
+ * API adds both itself, SMTP does not.
  */
-function buildMime({ from, to, cc, bcc, subject, body, inReplyTo, references, attachments }) {
+function buildRawMime({ from, to, cc, bcc, subject, body, inReplyTo, references, attachments, date, messageId }) {
   const headers = [
+    ...(date      ? [`Date: ${date.toUTCString().replace('GMT', '+0000')}`] : []),
+    ...(messageId ? [`Message-ID: ${messageId}`] : []),
     `From: ${from}`,
     `To: ${to}`,
     ...(cc  ? [`Cc: ${cc}`]   : []),
@@ -334,8 +350,11 @@ function buildMime({ from, to, cc, bcc, subject, body, inReplyTo, references, at
     lines = [...headers, ...textPart];
   }
 
-  return Buffer.from(lines.join('\r\n'), 'utf8').toString('base64url');
+  return lines.join('\r\n');
 }
+
+/** The same message, base64url-encoded as the Gmail API wants it. */
+const buildMime = (fields) => Buffer.from(buildRawMime(fields), 'utf8').toString('base64url');
 
 // ─── Send / reply / forward ─────────────────────────────────────────────────
 
@@ -512,7 +531,7 @@ const deleteDraft = (accessToken, draftId) =>
 const getProfile = (accessToken) => call(accessToken, '/profile');
 
 module.exports = {
-  searchMessages, searchThreads, getMessage, getThread, getAttachmentData,
+  searchMessages, searchThreads, getMessage, getThread, getAttachmentData, getAttachment,
   sendMessage, getReplyContext, forwardMessage,
   modifyLabels, modifyThreadLabels,
   listLabels, createLabel, updateLabel, deleteLabel,
@@ -520,6 +539,7 @@ module.exports = {
   listDrafts, getDraft, createDraft, updateDraft, sendDraft, deleteDraft,
   getProfile,
   MAX_BODY_CHARS,
+  buildRawMime, htmlToText, parseAddresses, addressOf, decodeEntities, truncateBody,
   _internal: { buildMime, extractBody, encodeHeader, buildUrl, decodeEntities, collectAttachments, truncateBody,
               parseAddresses, addressOf, summarizeThread, mapLimit },
 };

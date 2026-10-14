@@ -200,6 +200,93 @@ convenience path, which is the one that would actually have slipped — and that
 session cookie and an MCP token cannot be used as each other. A leak fails loudly
 in the suite instead of returning plausible data in production.
 
+## 8 — AOL, the first mailbox that is not Google
+
+The argument in entry 1 does not care which provider the second mailbox is at.
+Someone whose other address is AOL had the same relink-ask-relink problem, plus a
+second app to check.
+
+**An app password, because there is no other door.** AOL's mail platform offers
+OAuth to mail clients only on an approved partner list. An app password is the
+supported route for everyone else: generated for one app, mail-only, deletable
+without touching the real password. It is stored exactly as Google tokens are
+(AES-256-GCM under `TOKEN_ENC_KEY`), and only after it has signed in to both IMAP
+and SMTP, so a typo is caught on the link page rather than on Claude's first call.
+Hosts live in `imap_providers.js` and never in a request or a row, so linking can
+never become "make the server connect where I say".
+
+**Behind the same tools, not beside them.** A parallel `aol_*` set would have
+doubled the surface and lost the property the server exists for — one search
+across every mailbox. `imap_api` exports `gmail_api`'s functions with
+`gmail_api`'s result shapes, and `mailFor` / `fanOutMail` hand each tool the right
+client per mailbox. Calendar, Drive, Contacts and Tasks stay Google-only, and
+naming an AOL address to one of them says "mail only" instead of "not linked".
+
+**Libraries this time, deliberately.** Entry 4's standard-library rule was about
+parsing a file format, where the risk is plausible wrong text and the job is
+bounded. IMAP is a stateful protocol with literals, continuations and server
+quirks; MIME decoding needs every legacy charset; SMTP needs AUTH and dot-
+stuffing. `imapflow`, `mailparser` and `nodemailer` are the maintained standard
+for each. They are pinned to exact versions at least two weeks old — `imapflow`
+had shipped twice on the day this was written — and both run with logging off,
+because their debug logs would otherwise be the one place a password could land.
+
+**What replaces `gmail.modify`.** Gmail's "cannot delete permanently" is a
+property of the grant. An app password can do anything, so for AOL it became a
+property of the code instead, which is weaker and worth saying plainly:
+
+- The only expunge in `imap_api.js` is `removeDraft`: one UID, in Drafts, by
+  `UID EXPUNGE`. Without UIDPLUS a plain `EXPUNGE` would also take every other
+  `\Deleted` message in the folder, so the draft goes to Trash instead.
+- imapflow emulates MOVE with copy-and-expunge on servers that lack it. Moves
+  refuse a server with neither MOVE nor UIDPLUS rather than reach that path.
+- Deleting a Gmail label keeps the mail; deleting an IMAP folder deletes it. So
+  `delete_label` on AOL refuses any folder that still holds a message.
+- `test:imap` asserts that every expunge the scripted server ever saw was a
+  single draft, in Drafts.
+
+**Refuse what does not translate.** Gmail search syntax compiles to IMAP SEARCH.
+An operator with no equivalent — `category:`, `is:important`, `filename:` — is
+refused by name, because dropping it would widen the search and return results
+that look like an answer to the question that was not asked (principle 2).
+`in:`/`label:` pick folders and `has:attachment` is checked against body
+structure, so those three must apply to the whole query and are refused inside
+`OR` or parentheses rather than half-applied.
+
+**Ids move.** An IMAP id is folder + UID, so archiving gives a message a new id.
+Every moving call returns the new one. UIDVALIDITY rides inside the id, so an id
+from a folder the server renumbered is refused as stale instead of silently
+naming whichever message now holds that UID.
+
+**What the first live link found** (entry 6 again: the stub had said yes to all
+of it). Linking, search, reading, drafts and folder listing worked first time.
+Three things did not, and each is now in `test:imap` as an "AOL as measured"
+server so it cannot quietly come back:
+
+- **Threads came back empty.** AOL's `SEARCH HEADER` matches Message-ID but
+  never References or In-Reply-To (and takes ~8 s to say so), and an `OR` that
+  includes either matches *nothing*, taking the Message-ID branch down with it.
+  AOL does have OBJECTID, and the THREADID it reports in FETCH is right across
+  folders — a reply in Sent carries its original's — but `SEARCH THREADID` found
+  the original one time in three. So threads are now gathered by reading
+  THREADID off each folder's newest 500 messages, plus a Message-ID search for
+  ancestors; References/In-Reply-To are searched only on servers without
+  THREADID, and separately.
+- **Previews were CSS.** Marketing mail spends its first kilobytes on `<head>`
+  and `<style>`; a partial fetch cut inside them, and the HTML-to-text pass
+  expects whole documents. Snippets now read 16 KB and strip unclosed head,
+  style and comments, and a half-fetched tag.
+- **Everything took 8–13 s.** AOL answers each command in 0.4–0.9 s and signing
+  in takes four of them. Connections are now kept for a minute between calls,
+  part 1 rides along with the summary fetch, and empty folders skip SEARCH. A
+  read or a draft is now 0.3–1.5 s; a search across folders is still ~4–8 s and
+  a thread ~9–12 s, because the floor is round trips × folders. Searching
+  folders in parallel over a few connections is the next step if that matters.
+
+Still unproven: whether AOL files an SMTP submission in Sent itself. Nothing
+was sent during the live test; the code checks Sent for the Message-ID and
+appends only when it is absent, so either answer leaves exactly one copy.
+
 ---
 
 ## Principles that keep applying

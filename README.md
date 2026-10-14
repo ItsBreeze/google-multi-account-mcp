@@ -6,14 +6,20 @@ Claude's built-in Google connectors each hold exactly one account; connecting a
 second replaces the first. This holds as many as you link, and every search tool
 fans out across all of them in a single call.
 
+**AOL mailboxes link too.** They are reached over IMAP and SMTP with an app
+password, sit behind the same mail tools, and are searched together with Gmail —
+see [AOL mailboxes](#aol-mailboxes).
+
 You run it yourself. It holds your Google tokens in your own database, encrypted,
 and talks to Google directly — nothing passes through a third party.
 
-Node and Postgres, five tables, and no dependencies beyond Express, `pg` and
-`jsonwebtoken`. Document text extraction — PDF, Word, Excel, PowerPoint,
-OpenDocument — uses only Node's standard library.
+Node and Postgres, six tables. Dependencies are Express, `pg` and `jsonwebtoken`,
+plus `imapflow`, `mailparser` and `nodemailer` for AOL — IMAP, MIME and SMTP
+are protocols, not parsing jobs, and each library is the maintained standard for its
+one. Document text extraction — PDF, Word, Excel, PowerPoint, OpenDocument — uses
+only Node's standard library.
 
-**Status:** running in production against real mailboxes, with 435 automated
+**Status:** running in production against real mailboxes, with 564 automated
 checks. Built for one person's needs and published because the one-account limit
 is not unique to them. Treat it as working software with a small user base, not
 as a hardened product.
@@ -25,7 +31,7 @@ git clone https://github.com/ItsBreeze/google-multi-account-mcp.git
 cd google-multi-account-mcp
 npm install
 cp .env.example .env      # fill it in — see Setup below
-npm run migrate           # creates the five tables
+npm run migrate           # creates the six tables
 npm start
 ```
 
@@ -43,7 +49,8 @@ anything that runs Node and reaches Postgres) and follow **Setup**.
 | GET | `/.well-known/oauth-protected-resource` | RFC 9728 discovery |
 | GET | `/.well-known/oauth-authorization-server` | RFC 8414 discovery |
 | GET | `/gmail/connect` | Link an account (repeat per account) |
-| POST | `/gmail/unlink` | Unlink one, revoking the grant at Google |
+| GET/POST | `/gmail/aol` | Link an AOL mailbox with an app password (checked against AOL before it is stored) |
+| POST | `/gmail/unlink` | Unlink one, revoking the grant at Google (or deleting the stored AOL app password) |
 
 ## Tools (54)
 
@@ -52,7 +59,7 @@ out across every linked account** and merges the results — the thing no
 single-account connector can do. On a write it names the one account to act on,
 so "create this event" is never ambiguous about whose calendar it lands in.
 
-### Gmail (23)
+### Mail — Gmail and AOL (23)
 
 | Area | Tools | Notes |
 |------|-------|-------|
@@ -91,6 +98,39 @@ so "create this event" is never ambiguous about whose calendar it lands in.
 |------|-------|-------|
 | Contacts | `search_contacts`, `list_contacts` | Read-only. Searches saved contacts **and** people the account has corresponded with, so "email Ann" resolves to an address instead of a guess |
 | Tasks | `list_task_lists`, `list_tasks`, `create_task`, `update_task`, `delete_task` | `list_id` defaults to the account's first list. `update_task` with `completed: true` ticks a task off; `false` reopens it. Google Tasks has no trash, so `delete_task` is permanent |
+
+## AOL mailboxes
+
+Link one at `/gmail/aol` with the address and an **app password** generated at
+[AOL Account Security](https://login.aol.com/account/security) — AOL has no OAuth
+for third-party mail clients outside an approved partner list, so this is the only
+door. The password is signed in to both IMAP and SMTP before it is stored, so a
+typo is reported on the link page, not on Claude's first tool call. It is stored
+AES-256-GCM encrypted under `TOKEN_ENC_KEY`, like the Google tokens. Hosts come
+from a preset in code (`imap_providers.js`), never from the request.
+
+The 23 mail tools work on an AOL mailbox unchanged, and a search with no
+`account` covers Gmail and AOL in one merged, date-sorted result. What differs
+is IMAP itself, and the tools say so rather than pretend:
+
+| Gmail | AOL over IMAP |
+|---|---|
+| Labels, several per message | Folders, one per message. `UNREAD`/`STARRED` are flags; `INBOX`, `SPAM`, `TRASH` and folder names move the message. A change that would need two folders is refused; `IMPORTANT` and categories do not exist |
+| Ids are permanent | An id is folder + UID, so **a move gives the message a new id** — every moving call returns it as `new_message_id`. An id from a folder the server renumbered is refused as stale, never resolved to a different message |
+| Gmail query syntax | Translated to IMAP SEARCH: `from: to: cc: bcc: subject: is:unread/read/starred has:attachment newer_than: older_than: after: before: in: label: larger: smaller:`, phrases, `OR`, `-`, parentheses. Anything else is **refused by name** — dropping `category:promotions` would return every message instead of a subset |
+| Threads by id | Threads by the server's THREADID where it has OBJECTID (AOL does), read off each folder's recent mail, plus a Message-ID search for ancestors — gathered across folders, so your replies in Sent count. Servers without THREADID fall back to the `References`/`In-Reply-To` chain. AOL cannot search References at all, which is why this is not one search |
+| Sent copies are automatic | After an SMTP send, Sent is checked for the message's Message-ID and the copy appended only if AOL did not file one itself. `Bcc` goes on the SMTP envelope only, never in the transmitted header |
+| `update_draft` edits in place | IMAP cannot edit: the new version is saved, then the old removed, so the draft id changes |
+| Deleting a label keeps the mail | Deleting a folder deletes its mail, so only an **empty** folder can be deleted |
+
+**No permanent delete, enforced in code.** Gmail's guarantee is structural — the
+scope cannot expunge. An app password can do anything, so here it is a property of
+`imap_api.js`: its one expunge is `removeDraft`, which acts on a single UID in the
+Drafts folder by `UID EXPUNGE` (and sends the draft to Trash on a server without
+it, since plain `EXPUNGE` would take every other `\Deleted` message too). Moves
+refuse a server that would emulate MOVE with a mailbox-wide expunge.
+`npm run test:imap` drives the client against a scripted server and asserts every
+expunge it ever sees was one draft, in Drafts.
 
 ## Document text extraction
 
@@ -267,10 +307,10 @@ deployment needs only environment variables.
 
 | Variable | Notes |
 |---|---|
-| `DATABASE_URL` | Postgres. The five tables create themselves on first boot |
+| `DATABASE_URL` | Postgres. The six tables create themselves on first boot |
 | `PUBLIC_BASE_URL` | The public origin, scheme and host only, no trailing slash. Becomes the OAuth issuer and the Google redirect URI, so it must match what Google has registered |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | From the Web application OAuth client |
-| `TOKEN_ENC_KEY` | 32 bytes, base64. Encrypts Google tokens at rest. **Losing or changing it makes every stored token undecryptable** |
+| `TOKEN_ENC_KEY` | 32 bytes, base64. Encrypts Google tokens and AOL app passwords at rest. **Losing or changing it makes every stored credential undecryptable** |
 | `JWT_SECRET` | Any long random string; signs MCP tokens and browser sessions via two separately derived keys. Changing it only forces everyone to authenticate again |
 | `LEGACY_OWNER_EMAIL` | Optional, one-time. Adopts mailboxes linked before per-user sign-in existed, on that address's first sign-in |
 | `PORT` | Optional, defaults to 3000. Most platforms set this for you |
@@ -332,6 +372,12 @@ any particular token.
   restores what `trash_file` removed. The first-party connector has neither,
   so a permission it grants cannot be taken back through the same interface.
   This is the one place the wider surface here is also the safer one.
+- **AOL app passwords are the one stored credential that is not an OAuth grant.**
+  They are encrypted like the tokens, checked before storage, never logged (both
+  protocol clients run with logging off), and cannot be revoked from here — unlinking
+  deletes the stored copy, and the link and deletion pages say to delete the app
+  password at AOL too. The link form is behind the sign-in rate limit, so it cannot
+  be used to guess AOL passwords through this server.
 - **Contacts are read-only** by scope, not just by omission.
 - **Drive writes are guarded where the first-party connector is simply narrower.**
   Claude's Drive connector shares with one email address and a role — it has no
@@ -365,7 +411,12 @@ src/services/office_text.js     .docx/.xlsx/.pptx/.odt text, via a ZIP reader
 src/services/pdf_text.js        PDF content-stream text, with a readability guard
 src/services/text_extract.js    one entry point both Drive and Gmail read through
 src/services/gmail_accounts.js  linked accounts, token refresh, scope gating
-src/mcp/shared.js               resolveAccount / tokenFor / fanOut / mergeSearch
+src/services/imap_api.js        AOL over IMAP/SMTP, the same surface as gmail_api
+src/services/imap_query.js      Gmail search syntax → IMAP SEARCH, refusing what it can't map
+src/services/imap_accounts.js   linked AOL mailboxes, app passwords encrypted at rest
+src/services/imap_providers.js  host presets — the only place a mail host comes from
+src/mcp/shared.js               resolveAccount / tokenFor / fanOut / mergeSearch, and
+                                mailFor / fanOutMail, which pick Gmail or IMAP per mailbox
 src/mcp/tools/                  one module per product, assembled by index.js
 ```
 
@@ -376,7 +427,7 @@ results.
 
 ## Tests
 
-Eleven suites, all plain Node — no framework, no new dependencies. 435 checks.
+All plain Node — no framework. 564 checks.
 
 ```bash
 # No database, no network:
@@ -393,9 +444,13 @@ npm run test:reach      # shared-drive request parameters, recurrence rules, and
                         # event a scoped write actually lands on
 npm run test:ownership  # which file id a write reaches, that a draft writes nothing,
                         # and that revoking is never gated
+npm run test:imap       # AOL: query translation, and the client against a scripted
+                        # IMAP/SMTP server — moves, ids, Bcc, Sent copies, no expunge
+npm run test:isolation  # one person's mailboxes, Gmail or AOL, are unreachable by another
 
 # Needs a database:
-DATABASE_URL=postgres://…  npm run test:accounts   # resolution + encryption at rest
+DATABASE_URL=postgres://…  npm run test:accounts        # resolution + encryption at rest
+DATABASE_URL=postgres://…  npm run test:imap-accounts   # AOL app passwords at rest, owner scoping
 
 # Needs the API running:
 npm start &

@@ -79,6 +79,8 @@ app.get('/.well-known/oauth-authorization-server/mcp',
 
 app.post('/mcp/oauth/authorize', authLimiter);
 app.get('/gmail/signin',         authLimiter);
+// Each attempt signs in to AOL with a submitted password: throttle it like a login.
+app.post('/gmail/aol',           authLimiter);
 
 app.use('/mcp',   mcpLimiter, requireConfigured, mcpRoutes);
 app.use('/gmail', requireConfigured, gmailLinkRoutes);

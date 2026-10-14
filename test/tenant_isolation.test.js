@@ -105,6 +105,18 @@ accounts.accessTokenFor = async (ownerKey, email) => {
   return 'stub-access-token';
 };
 
+// Alice also has an AOL mailbox; Bob has none.
+const MAIL = { [ALICE]: [{ email: 'alice@aol.com', provider: 'aol', created_at: '2026-01-01T00:00:00Z' }] };
+
+const imapAccounts = require('../src/services/imap_accounts');
+imapAccounts.list      = async (ownerKey) => MAIL[ownerKey] || [];
+imapAccounts.emailsFor = async (ownerKey) => (MAIL[ownerKey] || []).map(({ email, provider }) => ({ email, provider }));
+imapAccounts.credentialsFor = async (ownerKey, email) => {
+  const owned = (MAIL[ownerKey] || []).some(r => r.email === email);
+  if (!owned) throw new Error(`ISOLATION BREACH: ${ownerKey} obtained a password for ${email}`);
+  return { email, provider: 'aol', password: 'stub' };
+};
+
 const tools = require('../src/mcp/tools');
 const shared = require('../src/mcp/shared');
 
@@ -189,6 +201,25 @@ async function readsAreScoped() {
   await shared.fanOut(BOB, undefined, 'gmail', async (token, email) => { bobFan.push(email); return {}; });
   check('a second caller fans out over their own mailboxes only',
     bobFan.length === 1 && bobFan[0] === 'bob@example.com', bobFan.join(', '));
+
+  // The same, for AOL mailboxes reached with a stored app password.
+  check('list_accounts hides Alice\'s AOL mailbox from Bob',
+    !JSON.stringify(await tools.callTool('list_accounts', {}, BOB)).includes('alice@aol.com'));
+
+  const namedAol = await rejects(() => shared.mailFor(BOB, 'alice@aol.com'), /not linked/);
+  check('naming another person\'s AOL mailbox is refused', namedAol.threw, namedAol.message);
+  const partialAol = await rejects(() => shared.mailFor(BOB, 'aol'), /not linked/);
+  check('partial match cannot reach another person\'s AOL mailbox', partialAol.threw, partialAol.message);
+
+  const aliceMail = [];
+  await shared.fanOutMail(ALICE, undefined, async (api, handle, email) => { aliceMail.push(email); return {}; });
+  check('a mail fan-out covers the caller\'s Gmail and AOL mailboxes and no one else\'s',
+    aliceMail.length === 3 && aliceMail.every(e => e.startsWith('alice')), aliceMail.join(', '));
+
+  const bobMail = [];
+  await shared.fanOutMail(BOB, undefined, async (api, handle, email) => { bobMail.push(email); return {}; });
+  check('Bob\'s mail fan-out never touches Alice\'s AOL password',
+    bobMail.length === 1 && bobMail[0] === 'bob@example.com', bobMail.join(', '));
 }
 
 // ─── 3. Credentials from one surface do not work on another ─────────────────

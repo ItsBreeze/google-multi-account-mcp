@@ -1,6 +1,6 @@
 /**
  * Idempotent schema. Safe to run on every boot, and that is how server.js
- * uses it — five tables, no migration framework, no ordering to get wrong.
+ * uses it — six tables, no migration framework, no ordering to get wrong.
  */
 
 const pool = require('./pool');
@@ -26,6 +26,23 @@ CREATE TABLE IF NOT EXISTS gmail_accounts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_gmail_accounts_owner ON gmail_accounts(owner_key);
+
+-- One row per linked IMAP mailbox (AOL). There is no OAuth for these, so what
+-- is stored is an app password the user generated for this server — AES-256-GCM
+-- ciphertext, like the Google tokens. Hosts are not stored: they come from the
+-- provider preset in code, so a row can never point the server somewhere else.
+CREATE TABLE IF NOT EXISTS imap_accounts (
+  id            UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  owner_key     TEXT        NOT NULL,
+  email         TEXT        NOT NULL,
+  provider      TEXT        NOT NULL,
+  password_enc  TEXT        NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (owner_key, email)
+);
+
+CREATE INDEX IF NOT EXISTS idx_imap_accounts_owner ON imap_accounts(owner_key);
 
 -- OAuth clients registered by Claude via RFC 7591 dynamic registration.
 CREATE TABLE IF NOT EXISTS mcp_oauth_clients (
