@@ -1,7 +1,7 @@
 {
   "name": "google-multi-account-mcp",
   "version": "1.0.0",
-  "description": "A remote MCP server that gives Claude several Google accounts at once \u2014 Gmail, Calendar, Drive, Contacts and Tasks \u2014 where the first-party connectors hold one each",
+  "description": "A remote MCP server that gives Claude several Google accounts at once — Gmail, Calendar, Drive, Contacts and Tasks — plus AOL mail, where the first-party connectors hold one account each",
   "main": "src/server.js",
   "license": "MIT",
   "keywords": [
@@ -12,7 +12,9 @@
     "gmail",
     "google-drive",
     "google-calendar",
-    "connector"
+    "connector",
+    "aol",
+    "imap"
   ],
   "scripts": {
     "start": "node src/server.js",
@@ -32,7 +34,9 @@
     "test:ownership": "node test/ownership.test.js",
     "smoke": "node test/smoke_live.js",
     "test:isolation": "node test/tenant_isolation.test.js",
-    "test:billing": "node test/billing.test.js"
+    "test:billing": "node test/billing.test.js",
+    "test:imap": "node test/imap_mail.test.js",
+    "test:imap-accounts": "node test/imap_accounts.test.js"
   },
   "engines": {
     "node": ">=20"
@@ -41,7 +45,10 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "express-rate-limit": "^7.3.1",
+    "imapflow": "2.1.2",
     "jsonwebtoken": "^9.0.2",
+    "mailparser": "3.9.31",
+    "nodemailer": "10.0.12",
     "pg": "^8.11.5"
   }
 }

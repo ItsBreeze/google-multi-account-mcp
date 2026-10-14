@@ -23,7 +23,7 @@ router.get('/logo.png', (req, res) => res.sendFile(require('path').join(__dirnam
 
 const APP_NAME = 'Hub';
 const CONTACT  = (process.env.SUPPORT_EMAIL || 'brisebyme@gmail.com').trim();
-const UPDATED  = 'September 25, 2026';
+const UPDATED  = 'October 14, 2026';
 
 const billing = require('../services/billing');
 
@@ -66,12 +66,12 @@ router.get('/', (req, res) => {
   res.type('html').send(page(APP_NAME, `
   <img src="/logo.png" alt="" width="72" height="72" style="border-radius:16px;display:block;margin-bottom:1rem">
   <h1>${APP_NAME}</h1>
-  <p class="sub">Several Google accounts in one Claude connector.</p>
+  <p class="sub">Several Google accounts — and AOL mail — in one Claude connector.</p>
 
   <p>Claude's first-party Google connectors hold one account each. This server holds
      as many as you link — a personal Gmail and a work one, their calendars, Drives,
      contacts and tasks — and lets Claude search and act across all of them at once,
-     or any one of them by name.</p>
+     or any one of them by name. AOL mailboxes link too, and are searched alongside Gmail.</p>
 
   <h2>What it can do</h2>
   <ul>
@@ -83,6 +83,8 @@ router.get('/', (req, res) => {
         PDFs), create, edit, share, trash. Every outward action has an undo.</li>
     <li><strong>Contacts</strong> — read-only, so "email Ann" resolves to an address.</li>
     <li><strong>Tasks</strong> — read and write, across accounts.</li>
+    <li><strong>AOL Mail</strong> — the same mail tools, over IMAP and SMTP with an app
+        password you generate for this service. Never permanent delete.</li>
   </ul>
 
   <h2>How access works</h2>
@@ -113,8 +115,8 @@ router.get('/privacy', (req, res) => {
   <h1>Privacy Policy</h1>
   <p class="sub">Last updated ${UPDATED}</p>
 
-  <p>${APP_NAME} ("the service") connects Google accounts you choose to link to an
-     AI assistant you use, through the Model Context Protocol. This policy describes
+  <p>${APP_NAME} ("the service") connects Google accounts and AOL mailboxes you choose to
+     link to an AI assistant you use, through the Model Context Protocol. This policy describes
      exactly what the service stores, what it never stores, and why it asks for the
      access it asks for. The service is open source, so every statement here can be
      checked against the code.</p>
@@ -132,6 +134,10 @@ router.get('/privacy', (req, res) => {
         registers, and authorization codes and refresh tokens it is issued. Codes and
         tokens are stored as one-way hashes; codes are single-use and expire in five
         minutes, refresh tokens rotate on every use.</li>
+    <li><strong>AOL app passwords</strong> for each AOL mailbox you link — a password AOL
+        generates for this service alone, encrypted at rest with AES-256-GCM like the Google
+        tokens. It is checked against AOL before it is stored, used only to sign in to AOL's
+        mail servers, and never logged or shown back.</li>
     <li><strong>Subscription status</strong> — if you subscribe, your Stripe customer and
         subscription IDs, the subscription's status and renewal date. Card details go
         to Stripe directly and never reach this service.</li>
@@ -165,6 +171,14 @@ router.get('/privacy', (req, res) => {
         <td>Know which account was linked, and which person is signed in.</td></tr>
   </table>
 
+  <h2>AOL mailboxes</h2>
+  <p>AOL offers no OAuth sign-in for mail apps, so an AOL mailbox is linked with an app
+     password instead. That password reaches the whole mailbox, so the limits are kept by the
+     service itself: it searches, reads, drafts, sends, files into folders and trashes mail on
+     your instruction, and never deletes mail permanently. The only deletion it performs is of
+     a single draft you ask it to delete or replace, and it refuses to delete a folder that
+     still holds mail. AOL mailboxes have no calendar, files, contacts or tasks here.</p>
+
   <h2>Limited Use disclosure</h2>
   <p>The service's use and transfer of information received from Google APIs adheres
      to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google
@@ -178,6 +192,9 @@ router.get('/privacy', (req, res) => {
   <ul>
     <li><strong>Google</strong> — every read and write is a request to Google's APIs,
         authorized by the tokens for the relevant account.</li>
+    <li><strong>AOL</strong> — for an AOL mailbox you link, every read and write is an IMAP
+        or SMTP session with AOL's mail servers, signed in with that mailbox's app password.
+        AOL receives no Google user data.</li>
     <li><strong>Your AI assistant</strong> — results are returned to the MCP client
         (for example, Claude) that made the request under your credentials. What that
         assistant retains is governed by its own privacy policy.</li>
@@ -201,7 +218,9 @@ router.get('/privacy', (req, res) => {
   <ul>
     <li><strong>Unlink an account</strong> at <a href="/gmail/connect">/gmail/connect</a> —
         the service revokes its grant with Google and deletes the stored tokens and
-        identifiers for that account.</li>
+        identifiers for that account. For an AOL mailbox, unlinking deletes the stored app
+        password; delete the app password itself in AOL Account Security too, since an app
+        password cannot be revoked from here.</li>
     <li><strong>Revoke from Google's side</strong> at
         <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a> —
         stored tokens become useless immediately.</li>
@@ -230,13 +249,13 @@ router.get('/terms', (req, res) => {
   <p class="sub">Last updated ${UPDATED}</p>
 
   <h2>The service</h2>
-  <p>${APP_NAME} connects Google accounts you link to an AI assistant you use, so the
+  <p>${APP_NAME} connects Google accounts and AOL mailboxes you link to an AI assistant you use, so the
      assistant can read and act on those accounts at your instruction. By signing in
      or linking an account you agree to these terms.</p>
 
   <h2>Your account and your instructions</h2>
   <ul>
-    <li>You may only link Google accounts you are authorized to use.</li>
+    <li>You may only link accounts and mailboxes you are authorized to use.</li>
     <li>Actions the service performs — sending mail, editing files, changing events —
         are performed on your instruction, through your AI assistant, using your
         granted access. You are responsible for those instructions.</li>

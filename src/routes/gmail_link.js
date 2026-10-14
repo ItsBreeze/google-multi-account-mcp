@@ -18,13 +18,15 @@
  * is what decides whose mailboxes the new link joins.
  */
 
-const express  = require('express');
-const jwt      = require('jsonwebtoken');
-const google   = require('../services/google_oauth');
-const accounts = require('../services/gmail_accounts');
-const identity = require('../services/identity');
-const mcpOauth = require('../services/mcp_oauth');
-const billing  = require('../services/billing');
+const express      = require('express');
+const jwt          = require('jsonwebtoken');
+const google       = require('../services/google_oauth');
+const accounts     = require('../services/gmail_accounts');
+const imapAccounts = require('../services/imap_accounts');
+const providers    = require('../services/imap_providers');
+const identity     = require('../services/identity');
+const mcpOauth     = require('../services/mcp_oauth');
+const billing      = require('../services/billing');
 
 const router = express.Router();
 
@@ -42,12 +44,13 @@ const page = (title, inner) => `<!doctype html>
   .card { width: 100%; max-width: 420px; }
   h1 { font-size: 1.25rem; margin: 0 0 .5rem; }
   p { margin: 0 0 1rem; opacity: .75; font-size: .95rem; }
-  input[type=email] { width: 100%; padding: .8rem; font-size: 1rem;
+  input[type=email], input[type=password] { width: 100%; padding: .8rem; font-size: 1rem;
     box-sizing: border-box; border: 1px solid rgba(128,128,128,.5); border-radius: 10px;
     background: transparent; color: inherit; margin-bottom: .6rem; }
   button, .btn { display: block; width: 100%; box-sizing: border-box; text-align: center;
     padding: .85rem; font-size: 1rem; font-weight: 600; border: 0; border-radius: 10px;
     background: #2563eb; color: #fff; text-decoration: none; margin-top: .5rem; }
+  button:disabled { opacity: .7; cursor: progress; }
   ul { padding-left: 1.1rem; } li { margin: .3rem 0; }
   code { background: rgba(128,128,128,.15); padding: .15rem .35rem; border-radius: 5px; font-size: .9em; }
   .err { color: #dc2626; font-size: .9rem; margin-bottom: .6rem; }
@@ -55,6 +58,18 @@ const page = (title, inner) => `<!doctype html>
   .alt { margin-top: 1rem; font-size: .85rem; text-align: center; }
 </style></head>
 <body><div class="card">${inner}</div></body></html>`;
+
+/** Every address linked to an owner, Google and IMAP, for the confirmation pages. */
+async function allLinked(ownerKey) {
+  const [google, mail] = await Promise.all([accounts.list(ownerKey), imapAccounts.list(ownerKey)]);
+  return [
+    ...google.map(a => a.email),
+    ...mail.map(a => `${a.email} (${providers.preset(a.provider).name})`),
+  ];
+}
+
+const linkedList = (emails) =>
+  `<ul>${emails.map(e => `<li><code>${escapeHtml(e)}</code></li>`).join('') || '<li>none yet</li>'}</ul>`;
 
 /** The exact redirect URI this deployment sends — a public value, safe to show. */
 function redirectUriInUse() {
@@ -131,12 +146,13 @@ const linkForm = (session, error) => page('Link a Google account', `
     <input type="email" name="login_hint" placeholder="Account to link (optional)" autocomplete="off">
     <button type="submit">Continue to Google</button>
   </form>
+  <a class="btn" href="/gmail/aol" style="background:transparent;color:inherit;border:1px solid rgba(128,128,128,.5)">Link an AOL mailbox instead</a>
   <p class="alt">${billing.enabled() ? '<a href="/billing">Subscription</a> · ' : ''}<a href="/gmail/signout?next=%2Fgmail%2Fconnect">Sign out</a></p>
   <details style="margin-top:2.5rem">
     <summary style="cursor:pointer;font-size:.85rem;opacity:.6">Delete everything</summary>
     <p style="font-size:.85rem">Unlinks every account (revoking this server's access at
-       Google), cancels any subscription, deletes the stored tokens and your identity's records here, and signs
-       you out. Nothing about you remains. Type <code>delete</code> to confirm.</p>
+       Google, and deleting any stored AOL app password), cancels any subscription, deletes the stored tokens and
+       your identity's records here, and signs you out. Nothing about you remains. Type <code>delete</code> to confirm.</p>
     <form method="POST" action="/gmail/delete-everything">
       <input type="text" name="confirm" placeholder="delete" autocomplete="off">
       <button type="submit" style="background:#b91c1c">Delete everything</button>
@@ -163,6 +179,84 @@ router.post('/connect', express.urlencoded({ extended: false }), (req, res, next
     );
 
     res.redirect(302, google.authUrl({ state, loginHint: req.body?.login_hint || undefined }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── Link an AOL mailbox ────────────────────────────────────────────────────
+
+/**
+ * IMAP mailboxes link with an address and an app password — there is no OAuth
+ * round-trip to send anyone on. The password is checked against AOL's IMAP and
+ * SMTP servers before it is stored, so a typo is reported here rather than on
+ * Claude's first tool call.
+ *
+ * The cookie is SameSite=Lax, so another site cannot post this form into
+ * someone's session and attach a mailbox of its own choosing.
+ */
+const aolForm = (session, error, emailValue) => {
+  const aol = providers.preset('aol');
+  return page('Link an AOL mailbox', `
+  <h1>Link an AOL mailbox</h1>
+  <p>Signed in as <code>${escapeHtml(session.email || session.ownerKey)}</code>.
+     Mailboxes you link here are reachable by you and nobody else.</p>
+  <p>AOL does not let mail apps like this one sign in with OAuth, so it takes an
+     <strong>app password</strong>: a separate password AOL generates for one app. It works only for mail,
+     and you can delete it at any time without changing your real password.</p>
+  <ol>
+    <li>Open <a href="${escapeHtml(aol.appPasswordUrl)}" target="_blank" rel="noopener">AOL Account Security</a>.</li>
+    <li>Choose <strong>Generate app password</strong>, name it <code>Hub</code>, and generate it.</li>
+    <li>Paste it below. Never paste your real AOL password.</li>
+  </ol>
+  <p>Linking grants this server <strong>mail</strong> for that mailbox: search, read, draft, send, file into
+     folders, trash — never permanent delete. The app password is stored encrypted and used only to sign in to
+     AOL's mail servers.</p>
+  ${error ? `<div class="err">${escapeHtml(error)}</div>` : ''}
+  <!-- Signing in to AOL's IMAP and SMTP takes several seconds; say so, and stop a second click sending it twice. -->
+  <form method="POST" action="/gmail/aol"
+        onsubmit="var b=this.querySelector('button');b.disabled=true;b.textContent='Checking with AOL… (about 10 seconds)';">
+    <input type="email" name="email" placeholder="you@aol.com" value="${escapeHtml(emailValue || '')}" required autocomplete="username">
+    <input type="password" name="app_password" placeholder="App password" required autocomplete="new-password">
+    <button type="submit">Link AOL mailbox</button>
+  </form>
+  <p class="alt"><a href="/gmail/connect">Link a Google account instead</a></p>`);
+};
+
+router.get('/aol', (req, res) => {
+  const session = identity.readSession(req);
+  if (!session) return res.status(401).type('html').send(signInPrompt('/gmail/aol'));
+  res.type('html').send(aolForm(session, null));
+});
+
+router.post('/aol', express.urlencoded({ extended: false }), async (req, res, next) => {
+  try {
+    const session = identity.readSession(req);
+    if (!session) return res.status(401).type('html').send(signInPrompt('/gmail/aol', 'Your sign-in expired.'));
+
+    let linked;
+    try {
+      linked = await imapAccounts.link({
+        ownerKey: session.ownerKey,
+        email:    req.body?.email,
+        provider: 'aol',
+        password: req.body?.app_password,
+      });
+    } catch (err) {
+      if (!err.userFacing) throw err;
+      // A 4xx, so the sign-in rate limit counts it: this form must not become
+      // a way to guess AOL passwords through this server.
+      return res.status(400).type('html').send(aolForm(session, err.message, req.body?.email));
+    }
+
+    res.type('html').send(page('Linked', `
+      <h1><span class="ok">✓</span> ${escapeHtml(linked.email)} linked</h1>
+      <p>Access granted: <code>mail</code>. Claude now searches it together with your other mailboxes.</p>
+      <p>To cut access later, unlink it here <em>and</em> delete the app password at
+         <a href="${escapeHtml(providers.preset('aol').appPasswordUrl)}" target="_blank" rel="noopener">AOL Account Security</a>.</p>
+      <p>Accounts now connected:</p>
+      ${linkedList(await allLinked(session.ownerKey))}
+      <a class="btn" href="/gmail/connect">Link another account</a>`));
   } catch (err) {
     next(err);
   }
@@ -248,12 +342,12 @@ router.get('/oauth/callback', async (req, res, next) => {
       const target = safeNext(state.next);
       if (target) return res.redirect(302, target);
 
-      const linked = await accounts.list(ownerKey);
+      const linked = await allLinked(ownerKey);
       return res.type('html').send(page('Signed in', `
         <h1><span class="ok">✓</span> Signed in as ${escapeHtml(info.email)}</h1>
         ${claimed ? `<p>Adopted ${claimed} account(s) linked before sign-in existed.</p>` : ''}
         <p>Accounts connected (${linked.length}):</p>
-        <ul>${linked.map(a => `<li><code>${escapeHtml(a.email)}</code></li>`).join('') || '<li>none yet</li>'}</ul>
+        ${linkedList(linked)}
         <a class="btn" href="/gmail/connect">Link an account</a>`));
     }
 
@@ -274,7 +368,7 @@ router.get('/oauth/callback', async (req, res, next) => {
       tokens,
     });
 
-    const linked = await accounts.list(ownerKey);
+    const linked = await allLinked(ownerKey);
     const warning = tokens.refresh_token
       ? ''
       : '<p class="err">Google returned no refresh token. If access stops working, unlink and re-link this account.</p>';
@@ -294,7 +388,7 @@ router.get('/oauth/callback', async (req, res, next) => {
       <p>Access granted: <code>${escapeHtml(access.granted.join(', ') || 'none')}</code></p>
       ${missing}
       <p>Accounts now connected (${linked.length}):</p>
-      <ul>${linked.map(a => `<li><code>${escapeHtml(a.email)}</code></li>`).join('')}</ul>
+      ${linkedList(linked)}
       <a class="btn" href="/gmail/connect">Link another account</a>`));
   } catch (err) {
     next(err);
@@ -308,7 +402,8 @@ router.post('/accounts', express.urlencoded({ extended: false }), express.json()
   try {
     const session = identity.readSession(req);
     if (!session) return res.status(401).json({ error: 'unauthorized' });
-    res.json({ accounts: await accounts.list(session.ownerKey) });
+    const [google, mail] = await Promise.all([accounts.list(session.ownerKey), imapAccounts.list(session.ownerKey)]);
+    res.json({ accounts: google, mail_accounts: mail });
   } catch (err) { next(err); }
 });
 
@@ -325,7 +420,8 @@ router.post('/delete-everything', express.urlencoded({ extended: false }), async
       return res.status(400).type('html').send(linkForm(session, 'Type "delete" in the confirmation box to delete everything.'));
     }
 
-    const emails = await accounts.removeAll(session.ownerKey);
+    const emails     = await accounts.removeAll(session.ownerKey);
+    const mailEmails = await imapAccounts.removeAll(session.ownerKey);
     await mcpOauth.deleteOwnerGrants(session.ownerKey);
     await billing.cancelAndForget(session.ownerKey);
     identity.clearSession(res);
@@ -334,8 +430,12 @@ router.post('/delete-everything', express.urlencoded({ extended: false }), async
       <h1>Everything is deleted</h1>
       <p>${emails.length
           ? `Unlinked and revoked: ${emails.map(e => `<code>${escapeHtml(e)}</code>`).join(', ')}.`
-          : 'There were no linked accounts.'}
+          : (mailEmails.length ? '' : 'There were no linked accounts.')}
          Stored tokens are gone, any subscription is cancelled, and you are signed out.</p>
+      ${mailEmails.length ? `<p>Unlinked, with their stored app passwords deleted:
+         ${mailEmails.map(e => `<code>${escapeHtml(e)}</code>`).join(', ')}. An app password cannot be revoked from
+         here — delete it at <a href="${escapeHtml(providers.preset('aol').appPasswordUrl)}">AOL Account Security</a>
+         too.</p>` : ''}
       <p>Connected AI assistants lose access the moment their current hour's
          token expires. You can also revoke this server from your
          <a href="https://myaccount.google.com/permissions">Google account permissions</a> —
@@ -351,7 +451,9 @@ router.post('/unlink', express.urlencoded({ extended: false }), express.json(), 
     if (!req.body?.email) return res.status(400).json({ error: 'email is required' });
 
     // Scoped to the caller: unlinking can only ever reach your own rows.
-    const removed = await accounts.remove(session.ownerKey, req.body.email);
+    const removedGoogle = await accounts.remove(session.ownerKey, req.body.email);
+    const removedMail   = await imapAccounts.remove(session.ownerKey, req.body.email);
+    const removed = removedGoogle || removedMail;
     res.status(removed ? 200 : 404).json({ removed, email: req.body.email });
   } catch (err) { next(err); }
 });
