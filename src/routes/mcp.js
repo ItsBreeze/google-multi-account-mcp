@@ -16,6 +16,7 @@ const oauth    = require('../services/mcp_oauth');
 const identity = require('../services/identity');
 const tools    = require('../mcp/tools');
 const billing  = require('../services/billing');
+const { allLinked } = require('./gmail_link');
 
 const router = express.Router();
 
@@ -77,20 +78,27 @@ function authorizeUrlFor(params) {
   return `/mcp/oauth/authorize?${new URLSearchParams(Object.fromEntries(carried)).toString()}`;
 }
 
-function consentPage({ params, session, error, nextUrl }) {
+async function consentPage({ params, session, error, nextUrl }) {
   const hidden = ['client_id', 'redirect_uri', 'state', 'code_challenge', 'code_challenge_method', 'scope', 'response_type']
     .filter(k => params[k])
     .map(k => `<input type="hidden" name="${k}" value="${escapeHtml(params[k])}">`)
     .join('\n      ');
 
   const back = encodeURIComponent(nextUrl || authorizeUrlFor(params));
+  // The list is a courtesy; a database hiccup must not block authorizing.
+  const linked = session ? await allLinked(session.ownerKey).catch(() => null) : null;
+  const outline = 'background:transparent;color:inherit;border:1px solid rgba(128,128,128,.5)';
 
   // Signed out, the only offered action is to sign in. Signed in, the caller is
   // told which identity is about to be granted, because "authorize" means
   // nothing useful unless you know who you are authorizing as.
   const action = session
     ? `<p>Signing in as <code>${escapeHtml(session.email || session.ownerKey)}</code>.
-          Claude will reach the Google accounts linked under this identity, and no others.</p>
+          Claude will reach the accounts linked under this identity, and no others.</p>
+       ${linked ? `<p>Linked now (${linked.length}):</p>
+       <ul>${linked.map(e => `<li><code>${escapeHtml(e)}</code></li>`).join('') || '<li>none yet</li>'}</ul>` : ''}
+       <a class="btn" href="/gmail/connect?next=${back}" style="${outline}">Link ${linked?.length ? 'another' : 'a'} Google account</a>
+       <a class="btn" href="/gmail/aol?next=${back}" style="${outline}">Link an AOL mailbox</a>
        <form method="POST" action="/mcp/oauth/authorize">
       ${hidden}
          <button type="submit">Authorize Claude</button>
@@ -115,11 +123,12 @@ function consentPage({ params, session, error, nextUrl }) {
     border-radius: 10px; background: #2563eb; color: #fff; text-decoration: none; }
   code { background: rgba(128,128,128,.15); padding: .15rem .35rem; border-radius: 5px; font-size: .9em; }
   .err { color: #dc2626; font-size: .9rem; margin-bottom: .75rem; }
+  ul { padding-left: 1.1rem; margin: 0 0 1rem; } li { margin: .3rem 0; }
   .alt { margin-top: 1rem; font-size: .85rem; text-align: center; }
 </style></head>
 <body><div class="card">
   <h1>Authorize Hub</h1>
-  <p>Claude is asking to connect to Hub, which holds the Google accounts you link.</p>
+  <p>Claude is asking to connect to Hub, which holds the Google accounts and AOL mailboxes you link.</p>
   ${error ? `<div class="err">${escapeHtml(error)}</div>` : ''}
   ${action}
 </div></body></html>`;
@@ -151,9 +160,9 @@ router.get('/oauth/authorize', async (req, res) => {
 
   try {
     await validateAuthRequest(req.query);
-    res.type('html').send(consentPage({ params: req.query, session, nextUrl }));
+    res.type('html').send(await consentPage({ params: req.query, session, nextUrl }));
   } catch (err) {
-    res.status(400).type('html').send(consentPage({ params: req.query, session, nextUrl, error: err.message }));
+    res.status(400).type('html').send(await consentPage({ params: req.query, session, nextUrl, error: err.message }));
   }
 });
 
@@ -169,7 +178,7 @@ router.post('/oauth/authorize', express.urlencoded({ extended: false }), async (
     // the caller back through sign-in with the request intact, rather than
     // failing an authorization that was only ever a few seconds stale.
     if (!session) {
-      return res.status(401).type('html').send(consentPage({
+      return res.status(401).type('html').send(await consentPage({
         params, session: null, nextUrl,
         error: 'That sign-in expired. Sign in again to authorize.',
       }));
@@ -189,7 +198,7 @@ router.post('/oauth/authorize', express.urlencoded({ extended: false }), async (
 
     res.redirect(302, target.toString());
   } catch (err) {
-    res.status(400).type('html').send(consentPage({ params, session, nextUrl, error: err.message }));
+    res.status(400).type('html').send(await consentPage({ params, session, nextUrl, error: err.message }));
   }
 });
 

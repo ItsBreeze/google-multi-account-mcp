@@ -73,8 +73,21 @@ const check = (name, cond, extra='') => {
     consent.status === 200 && (await consent.text()).includes('Continue with Google'));
 
   const consentIn = await fetch(`${BASE}/mcp/oauth/authorize?${q}`, { headers: { Cookie: sessionCookie() } });
+  const consentHtml = await consentIn.text();
   check('signed-in consent screen names the identity',
-    consentIn.status === 200 && (await consentIn.text()).includes('e2e@example.com'));
+    consentIn.status === 200 && consentHtml.includes('e2e@example.com'));
+  const back = encodeURIComponent(`/mcp/oauth/authorize?${q}`);
+  check('consent screen offers linking more Google accounts and AOL, returning here',
+    consentHtml.includes(`/gmail/connect?next=${back}`) && consentHtml.includes(`/gmail/aol?next=${back}`));
+
+  const backPath = `/mcp/oauth/authorize?${q}`;
+  for (const path of ['/gmail/connect', '/gmail/aol']) {
+    const html = await fetch(`${BASE}${path}?next=${back}`, { headers: { Cookie: sessionCookie() } }).then(r => r.text());
+    check(`${path} carries the way back to Claude`,
+      html.includes('name="next"') && html.includes('back to Claude') && html.includes(backPath.replace(/&/g, '&amp;')));
+    const offsite = await fetch(`${BASE}${path}?next=${encodeURIComponent('//evil.example')}`, { headers: { Cookie: sessionCookie() } }).then(r => r.text());
+    check(`${path} drops an off-site next`, !offsite.includes('evil.example'));
+  }
 
   const mismatch = await fetch(`${BASE}/mcp/oauth/authorize?${new URLSearchParams({...Object.fromEntries(q), redirect_uri:'https://evil.example.com/cb'})}`);
   check('unregistered redirect_uri rejected', mismatch.status === 400);
@@ -265,6 +278,11 @@ const check = (name, cond, extra='') => {
   check('requests the calendar, drive, contacts and tasks scopes',
     ['auth/calendar', 'auth/drive', 'auth/contacts.readonly', 'auth/tasks'].every(sc => scopes.includes(sc)));
   check('never requests the permanent-delete mail scope', !scopes.includes('mail.google.com'));
+
+  const linkBack = await fetch(`${BASE}/gmail/connect`, form({ next: '/mcp/oauth/authorize?x=1' }, sessionCookie()));
+  const linkState = new URL(linkBack.headers.get('location') || 'http://x').searchParams.get('state') || '';
+  check('link flow carries next through Google in the signed state',
+    JSON.parse(Buffer.from(linkState.split('.')[1] || '', 'base64url').toString() || '{}').next === '/mcp/oauth/authorize?x=1');
 
   const badState = await fetch(`${BASE}/gmail/oauth/callback?code=x&state=forged`);
   check('forged OAuth state rejected', badState.status === 400);
