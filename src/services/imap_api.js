@@ -162,17 +162,10 @@ async function withImap(cred, fn) {
   }
 }
 
-/** Sign in to both IMAP and SMTP — run before a mailbox is stored, so a bad password never is. */
+/** Sign in over IMAP — run before a mailbox is stored, so a bad password never is. */
 async function verify(cred) {
+  // IMAP only: one app password covers IMAP and SMTP, and Railway blocks outbound SMTP below Pro, so an SMTP check here made linking time out.
   await disconnect(await connect(cred));
-  const transport = makeSmtp(smtpOptions(cred));
-  try {
-    await transport.verify();
-  } catch (err) {
-    throw friendly(err, cred);
-  } finally {
-    transport.close?.();
-  }
 }
 
 // ─── Folders ────────────────────────────────────────────────────────────────
