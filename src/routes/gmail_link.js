@@ -71,6 +71,16 @@ async function allLinked(ownerKey) {
 const linkedList = (emails) =>
   `<ul>${emails.map(e => `<li><code>${escapeHtml(e)}</code></li>`).join('') || '<li>none yet</li>'}</ul>`;
 
+// `next` is set when linking starts from Claude's consent page, so the user can
+// link several accounts and still get back to finish authorizing.
+const withNext = (path, next) => (next ? `${path}?next=${encodeURIComponent(next)}` : path);
+const nextField = (next) => (next ? `<input type="hidden" name="next" value="${escapeHtml(next)}">` : '');
+const OUTLINE = 'background:transparent;color:inherit;border:1px solid rgba(128,128,128,.5)';
+const backToClaude = (next, style) =>
+  (next ? `<a class="btn" href="${escapeHtml(next)}"${style ? ` style="${style}"` : ''}>Done — back to Claude</a>` : '');
+const linkAnother = (next) =>
+  `<a class="btn" href="${withNext('/gmail/connect', next)}"${next ? ` style="${OUTLINE}"` : ''}>Link another account</a>`;
+
 /** The exact redirect URI this deployment sends — a public value, safe to show. */
 function redirectUriInUse() {
   try { return google.config().redirectUri; } catch { return '(unavailable — check PUBLIC_BASE_URL)'; }
@@ -127,7 +137,7 @@ router.get('/signout', (req, res) => {
 
 // ─── Link a mailbox ─────────────────────────────────────────────────────────
 
-const linkForm = (session, error) => page('Link a Google account', `
+const linkForm = (session, error, next) => page('Link a Google account', `
   <h1>Link a Google account</h1>
   <p>Signed in as <code>${escapeHtml(session.email || session.ownerKey)}</code>.
      Accounts you link here are reachable by you and nobody else.</p>
@@ -143,10 +153,12 @@ const linkForm = (session, error) => page('Link a Google account', `
   <p><code>${escapeHtml(redirectUriInUse())}</code></p>
   ${error ? `<div class="err">${escapeHtml(error)}</div>` : ''}
   <form method="POST" action="/gmail/connect">
+    ${nextField(next)}
     <input type="email" name="login_hint" placeholder="Account to link (optional)" autocomplete="off">
     <button type="submit">Continue to Google</button>
   </form>
-  <a class="btn" href="/gmail/aol" style="background:transparent;color:inherit;border:1px solid rgba(128,128,128,.5)">Link an AOL mailbox instead</a>
+  <a class="btn" href="${withNext('/gmail/aol', next)}" style="${OUTLINE}">Link an AOL mailbox instead</a>
+  ${backToClaude(next, OUTLINE)}
   <p class="alt">${billing.enabled() ? '<a href="/billing">Subscription</a> · ' : ''}<a href="/gmail/signout?next=%2Fgmail%2Fconnect">Sign out</a></p>
   <details style="margin-top:2.5rem">
     <summary style="cursor:pointer;font-size:.85rem;opacity:.6">Delete everything</summary>
@@ -161,8 +173,8 @@ const linkForm = (session, error) => page('Link a Google account', `
 
 router.get('/connect', (req, res) => {
   const session = identity.readSession(req);
-  if (!session) return res.status(401).type('html').send(signInPrompt('/gmail/connect'));
-  res.type('html').send(linkForm(session, null));
+  if (!session) return res.status(401).type('html').send(signInPrompt(req.originalUrl));
+  res.type('html').send(linkForm(session, null, safeNext(req.query.next)));
 });
 
 router.post('/connect', express.urlencoded({ extended: false }), (req, res, next) => {
@@ -173,7 +185,7 @@ router.post('/connect', express.urlencoded({ extended: false }), (req, res, next
     // The owner travels in the signed state, so the mailbox lands on the identity
     // that started the flow even if the cookie lapses during Google's consent.
     const state = jwt.sign(
-      { purpose: 'gmail_link', ownerKey: session.ownerKey },
+      { purpose: 'gmail_link', ownerKey: session.ownerKey, next: safeNext(req.body?.next) },
       process.env.JWT_SECRET,
       { expiresIn: '10m' },
     );
@@ -195,7 +207,7 @@ router.post('/connect', express.urlencoded({ extended: false }), (req, res, next
  * The cookie is SameSite=Lax, so another site cannot post this form into
  * someone's session and attach a mailbox of its own choosing.
  */
-const aolForm = (session, error, emailValue) => {
+const aolForm = (session, error, emailValue, next) => {
   const aol = providers.preset('aol');
   return page('Link an AOL mailbox', `
   <h1>Link an AOL mailbox</h1>
@@ -216,21 +228,24 @@ const aolForm = (session, error, emailValue) => {
   <!-- Signing in to AOL's IMAP and SMTP takes several seconds; say so, and stop a second click sending it twice. -->
   <form method="POST" action="/gmail/aol"
         onsubmit="var b=this.querySelector('button');b.disabled=true;b.textContent='Checking with AOL… (about 10 seconds)';">
+    ${nextField(next)}
     <input type="email" name="email" placeholder="you@aol.com" value="${escapeHtml(emailValue || '')}" required autocomplete="username">
     <input type="password" name="app_password" placeholder="App password" required autocomplete="new-password">
     <button type="submit">Link AOL mailbox</button>
   </form>
-  <p class="alt"><a href="/gmail/connect">Link a Google account instead</a></p>`);
+  ${backToClaude(next, OUTLINE)}
+  <p class="alt"><a href="${withNext('/gmail/connect', next)}">Link a Google account instead</a></p>`);
 };
 
 router.get('/aol', (req, res) => {
   const session = identity.readSession(req);
-  if (!session) return res.status(401).type('html').send(signInPrompt('/gmail/aol'));
-  res.type('html').send(aolForm(session, null));
+  if (!session) return res.status(401).type('html').send(signInPrompt(req.originalUrl));
+  res.type('html').send(aolForm(session, null, null, safeNext(req.query.next)));
 });
 
 router.post('/aol', express.urlencoded({ extended: false }), async (req, res, next) => {
   try {
+    const back    = safeNext(req.body?.next);
     const session = identity.readSession(req);
     if (!session) return res.status(401).type('html').send(signInPrompt('/gmail/aol', 'Your sign-in expired.'));
 
@@ -246,7 +261,7 @@ router.post('/aol', express.urlencoded({ extended: false }), async (req, res, ne
       if (!err.userFacing) throw err;
       // A 4xx, so the sign-in rate limit counts it: this form must not become
       // a way to guess AOL passwords through this server.
-      return res.status(400).type('html').send(aolForm(session, err.message, req.body?.email));
+      return res.status(400).type('html').send(aolForm(session, err.message, req.body?.email, back));
     }
 
     res.type('html').send(page('Linked', `
@@ -256,7 +271,8 @@ router.post('/aol', express.urlencoded({ extended: false }), async (req, res, ne
          <a href="${escapeHtml(providers.preset('aol').appPasswordUrl)}" target="_blank" rel="noopener">AOL Account Security</a>.</p>
       <p>Accounts now connected:</p>
       ${linkedList(await allLinked(session.ownerKey))}
-      <a class="btn" href="/gmail/connect">Link another account</a>`));
+      ${backToClaude(back)}
+      ${linkAnother(back)}`));
   } catch (err) {
     next(err);
   }
@@ -389,7 +405,8 @@ router.get('/oauth/callback', async (req, res, next) => {
       ${missing}
       <p>Accounts now connected (${linked.length}):</p>
       ${linkedList(linked)}
-      <a class="btn" href="/gmail/connect">Link another account</a>`));
+      ${backToClaude(safeNext(state.next))}
+      ${linkAnother(safeNext(state.next))}`));
   } catch (err) {
     next(err);
   }
@@ -459,5 +476,6 @@ router.post('/unlink', express.urlencoded({ extended: false }), express.json(), 
 });
 
 router._internal = { safeNext };
+router.allLinked = allLinked;
 
 module.exports = router;
