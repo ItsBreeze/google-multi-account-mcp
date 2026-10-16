@@ -394,6 +394,34 @@ const DAY = 24 * 60 * 60 * 1000;
   await throwsWith('a Google fan-out with only AOL linked says why',
     () => shared.fanOut('o', undefined, 'calendar', async () => 1), 'need a Google account');
 
+  // ─── The SMTP relay: Railway can't reach SMTP, so a send goes over HTTPS ─
+
+  process.env.SMTP_RELAY_URL = 'https://relay.test/';
+  process.env.SMTP_RELAY_TOKEN = 'tok';
+  const posted = [];
+  let relayAnswer = { status: 200, body: { ok: true } };
+  const realFetch = global.fetch;
+  global.fetch = async (url, init) => {
+    posted.push({ url, init, body: JSON.parse(init.body) });
+    return new Response(JSON.stringify(relayAnswer.body), { status: relayAnswer.status });
+  };
+  imap._internal.setFactories({ smtp: imap._internal.relayTransport });
+
+  await imap.sendMessage(cred, { to: 'Ann <ann@example.com>', bcc: 'secret@example.com', subject: 'Via relay', body: 'hi' });
+  const relayed = posted[0];
+  check('the relay is sent the preset host, not one from the caller', relayed.body.host === 'smtp.aol.com' && relayed.body.port === 465);
+  check('the relay call carries its token', relayed.url === 'https://relay.test/' && relayed.init.headers.authorization === 'Bearer tok');
+  check('Bcc rides the relay envelope, not the header',
+    relayed.body.to.includes('secret@example.com') && !/^bcc:/im.test(relayed.body.raw), relayed.body.to.join(','));
+
+  relayAnswer = { status: 502, body: { error: 'SMTP AUTH: 535 5.7.0 (#AUTH005) Too many bad auth attempts.', code: 535 } };
+  await throwsWith('a relayed 535 reads as a refused app password',
+    () => imap.sendMessage(cred, { to: 'ann@example.com', subject: 'x', body: 'x' }), 'refused the app password');
+  relayAnswer = { status: 401, body: { error: 'unauthorized' } };
+  await throwsWith('a relay refusal is reported, not swallowed',
+    () => imap.sendMessage(cred, { to: 'ann@example.com', subject: 'x', body: 'x' }), 'unauthorized');
+  global.fetch = realFetch;
+
   console.log(fail ? `\n${fail} FAILED` : '\nimap mail correct');
   process.exit(fail ? 1 : 0);
 })().catch((err) => { console.error('Test harness error:', err); process.exit(1); });

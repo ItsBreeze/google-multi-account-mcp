@@ -42,7 +42,26 @@ let   SENT_COPY_WAITS_MS   = [0, 1500, 3000];
 
 // Swappable for the test suite, which drives a scripted mailbox instead of a server.
 let makeImap = (options) => new ImapFlow(options);
-let makeSmtp = (options) => nodemailer.createTransport(options);
+// Railway blocks outbound SMTP below Pro, so there the submission goes over HTTPS to smtp-relay/, which speaks SMTP to AOL.
+let makeSmtp = (options) => process.env.SMTP_RELAY_URL ? relayTransport(options) : nodemailer.createTransport(options);
+
+/** The slice of a nodemailer transport that deliver() uses, carried by smtp-relay/. */
+function relayTransport({ host, port, auth }) {
+  return {
+    async sendMail({ envelope, raw }) {
+      const res = await fetch(process.env.SMTP_RELAY_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${process.env.SMTP_RELAY_TOKEN}` },
+        body: JSON.stringify({ host, port, user: auth.user, pass: auth.pass, from: envelope.from, to: envelope.to, raw: String(raw) }),
+        signal: AbortSignal.timeout(60000),
+      });
+      if (res.ok) return { messageId: null };
+      const { error, code } = await res.json().catch(() => ({}));
+      throw Object.assign(new Error(error || `SMTP relay answered HTTP ${res.status}`), { responseCode: code });
+    },
+    close() {},
+  };
+}
 
 // ─── Connections ────────────────────────────────────────────────────────────
 
@@ -1331,6 +1350,6 @@ module.exports = {
     },
     setSentCopyWaits(waits) { SENT_COPY_WAITS_MS = waits; },
     encodeId, decodeId, encodeThread, decodeThread, stripHeader, setHeader, planChange, threadRoot,
-    decodeTransfer, snippetFrom, hasAttachment, bodyPart, searchScope, imapOptions, smtpOptions,
+    decodeTransfer, snippetFrom, hasAttachment, bodyPart, searchScope, imapOptions, smtpOptions, relayTransport,
   },
 };

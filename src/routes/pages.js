@@ -83,10 +83,9 @@ router.get('/', (req, res) => {
         PDFs), create, edit, share, trash. Every outward action has an undo.</li>
     <li><strong>Contacts</strong> — read-only, so "email Ann" resolves to an address.</li>
     <li><strong>Tasks</strong> — read and write, across accounts.</li>
-    <li><strong>AOL Mail</strong> — search, read, draft and file into folders, over IMAP
-        with an app password you generate for this service. Never permanent delete.
-        Sending goes over SMTP, which hub.grounders.app cannot reach yet, so AOL sending
-        works only on a self-hosted copy that can reach <code>smtp.aol.com</code>.</li>
+    <li><strong>AOL Mail</strong> — search, read, draft, send and file into folders, over
+        IMAP and SMTP with an app password you generate for this service. Never permanent
+        delete.</li>
   </ul>
 
   <h2>How access works</h2>
@@ -197,6 +196,10 @@ router.get('/privacy', (req, res) => {
     <li><strong>AOL</strong> — for an AOL mailbox you link, every read and write is an IMAP
         or SMTP session with AOL's mail servers, signed in with that mailbox's app password.
         AOL receives no Google user data.</li>
+    <li><strong>Cloudflare</strong> — mail you send from an AOL mailbox passes through a
+        relay we run on Cloudflare Workers, because our host blocks outbound SMTP. It
+        receives the message and that mailbox's app password for that one send, hands
+        them to AOL's mail server, and stores and logs nothing.</li>
     <li><strong>Your AI assistant</strong> — results are returned to the MCP client
         (for example, Claude) that made the request under your credentials. What that
         assistant retains is governed by its own privacy policy.</li>
