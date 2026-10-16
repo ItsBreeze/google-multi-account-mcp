@@ -83,8 +83,10 @@ router.get('/', (req, res) => {
         PDFs), create, edit, share, trash. Every outward action has an undo.</li>
     <li><strong>Contacts</strong> — read-only, so "email Ann" resolves to an address.</li>
     <li><strong>Tasks</strong> — read and write, across accounts.</li>
-    <li><strong>AOL Mail</strong> — the same mail tools, over IMAP and SMTP with an app
-        password you generate for this service. Never permanent delete.</li>
+    <li><strong>AOL Mail</strong> — search, read, draft and file into folders, over IMAP
+        with an app password you generate for this service. Never permanent delete.
+        Sending goes over SMTP, which hub.grounders.app cannot reach yet, so AOL sending
+        works only on a self-hosted copy that can reach <code>smtp.aol.com</code>.</li>
   </ul>
 
   <h2>How access works</h2>
