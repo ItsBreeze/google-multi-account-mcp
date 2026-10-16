@@ -38,8 +38,7 @@ and free while it is.
    [hub.grounders.app/gmail/connect](https://hub.grounders.app/gmail/connect).
 
 Google's review of the app is still in progress, so you will see an "unverified
-app" screen the first time. On the hosted copy, AOL mail can be searched, read,
-drafted and filed but not sent yet — see [AOL mailboxes](#aol-mailboxes).
+app" screen the first time.
 
 ## Quick start
 
