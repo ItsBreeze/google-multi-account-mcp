@@ -30,6 +30,10 @@ const billing = require('../services/billing');
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g,
   c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// The owner's Instagram handles, in the order every one of the owner's sites lists them.
+const INSTAGRAM_LINKS = ['kebe_keyboards', 'unslip.app', 'offhand.app', 'grounders.app', 'itsradio.app', 'hub.ai.app']
+  .map(h => `<a href="https://www.instagram.com/${h}/">@${h}</a>`);
+
 /** Wide, left-aligned column — these are documents, not dialogs. */
 const page = (title, inner) => `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -48,6 +52,7 @@ const page = (title, inner) => `<!doctype html>
   a { color: #2563eb; }
   nav { margin-bottom: 2.5rem; font-size: .9rem; }
   nav a { margin-right: 1.25rem; text-decoration: none; }
+  footer { margin-top: 3rem; }
   .btn { display: inline-block; padding: .7rem 1.4rem; border-radius: 10px; background: #2563eb;
          color: #fff; text-decoration: none; font-weight: 600; margin-top: .75rem; }
   table { border-collapse: collapse; width: 100%; font-size: .95rem; }
@@ -58,6 +63,7 @@ const page = (title, inner) => `<!doctype html>
 <body>
 <nav><a href="/">Home</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a></nav>
 ${inner}
+<footer><nav aria-label="Instagram">Instagram ${INSTAGRAM_LINKS.join(' ')}</nav></footer>
 </body></html>`;
 
 // ─── Home ───────────────────────────────────────────────────────────────────
@@ -298,3 +304,4 @@ router.get('/terms', (req, res) => {
 });
 
 module.exports = router;
+module.exports.INSTAGRAM_LINKS = INSTAGRAM_LINKS;

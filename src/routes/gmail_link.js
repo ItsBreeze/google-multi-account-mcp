@@ -27,6 +27,7 @@ const providers    = require('../services/imap_providers');
 const identity     = require('../services/identity');
 const mcpOauth     = require('../services/mcp_oauth');
 const billing      = require('../services/billing');
+const { INSTAGRAM_LINKS } = require('./pages');
 
 const router = express.Router();
 
@@ -57,7 +58,8 @@ const page = (title, inner) => `<!doctype html>
   .ok { color: #16a34a; font-weight: 600; }
   .alt { margin-top: 1rem; font-size: .85rem; text-align: center; }
 </style></head>
-<body><div class="card">${inner}</div></body></html>`;
+<body><div class="card">${inner}
+<p class="alt">Instagram ${INSTAGRAM_LINKS.join(' · ')}</p></div></body></html>`;
 
 /** Every address linked to an owner, Google and IMAP, for the confirmation pages. */
 async function allLinked(ownerKey) {
