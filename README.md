@@ -10,8 +10,9 @@ fans out across all of them in a single call.
 password, sit behind the same mail tools, and are searched together with Gmail —
 see [AOL mailboxes](#aol-mailboxes).
 
-You run it yourself. It holds your Google tokens in your own database, encrypted,
-and talks to Google directly — nothing passes through a third party.
+Run it yourself and it holds your Google tokens in your own database, encrypted,
+and talks to Google directly — nothing passes through a third party. Or
+[try the hosted one](#try-the-hosted-one) first.
 
 Node and Postgres, six tables. Dependencies are Express, `pg` and `jsonwebtoken`,
 plus `imapflow`, `mailparser` and `nodemailer` for AOL — IMAP, MIME and SMTP
@@ -23,6 +24,22 @@ only Node's standard library.
 checks. Built for one person's needs and published because the one-account limit
 is not unique to them. Treat it as working software with a small user base, not
 as a hardened product.
+
+## Try the hosted one
+
+A copy runs at [hub.grounders.app](https://hub.grounders.app). It is in testing,
+and free while it is.
+
+1. In Claude: **Settings → Connectors → Add custom connector**, with the URL
+   `https://hub.grounders.app/mcp`. ChatGPT, Cursor and other MCP clients take the
+   same URL as a remote MCP server.
+2. Sign in with Google once when asked.
+3. Link each account at
+   [hub.grounders.app/gmail/connect](https://hub.grounders.app/gmail/connect).
+
+Google's review of the app is still in progress, so you will see an "unverified
+app" screen the first time. On the hosted copy, AOL mail can be searched, read,
+drafted and filed but not sent yet — see [AOL mailboxes](#aol-mailboxes).
 
 ## Quick start
 
@@ -104,10 +121,17 @@ so "create this event" is never ambiguous about whose calendar it lands in.
 Link one at `/gmail/aol` with the address and an **app password** generated at
 [AOL Account Security](https://login.aol.com/account/security) — AOL has no OAuth
 for third-party mail clients outside an approved partner list, so this is the only
-door. The password is signed in to both IMAP and SMTP before it is stored, so a
-typo is reported on the link page, not on Claude's first tool call. It is stored
+door. The password is signed in to IMAP before it is stored (one app password
+covers IMAP and SMTP), so a typo is reported on the link page, not on Claude's
+first tool call. It is stored
 AES-256-GCM encrypted under `TOKEN_ENC_KEY`, like the Google tokens. Hosts come
 from a preset in code (`imap_providers.js`), never from the request.
+
+**Sending needs outbound SMTP.** On hub.grounders.app, AOL search, read, drafts
+and filing work and sending does not yet: the host it runs on blocks outbound
+SMTP, so a send times out. A self-hosted deployment that can reach
+`smtp.aol.com:465` sends normally. Gmail sending is unaffected — it goes through
+Google's API.
 
 The 23 mail tools work on an AOL mailbox unchanged, and a search with no
 `account` covers Gmail and AOL in one merged, date-sorted result. What differs
