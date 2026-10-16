@@ -127,11 +127,13 @@ first tool call. It is stored
 AES-256-GCM encrypted under `TOKEN_ENC_KEY`, like the Google tokens. Hosts come
 from a preset in code (`imap_providers.js`), never from the request.
 
-**Sending needs outbound SMTP.** On hub.grounders.app, AOL search, read, drafts
-and filing work and sending does not yet: the host it runs on blocks outbound
-SMTP, so a send times out. A self-hosted deployment that can reach
-`smtp.aol.com:465` sends normally. Gmail sending is unaffected — it goes through
-Google's API.
+**Sending goes through a relay where SMTP is blocked.** Railway blocks outbound
+SMTP below its Pro plan, so hub.grounders.app hands each AOL submission over
+HTTPS to a Cloudflare Worker (`smtp-relay/`) that speaks SMTP to
+`smtp.aol.com:465`. The Worker stores and logs nothing and reaches only preset
+hosts. It is used when `SMTP_RELAY_URL` and `SMTP_RELAY_TOKEN` are set; without
+them the server talks SMTP directly, as a self-hosted copy that can reach port
+465 should. Gmail sending is unaffected — it goes through Google's API.
 
 The 23 mail tools work on an AOL mailbox unchanged, and a search with no
 `account` covers Gmail and AOL in one merged, date-sorted result. What differs

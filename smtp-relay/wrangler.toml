@@ -1,0 +1,7 @@
+name = "hub-smtp-relay"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+# The Worker sees app passwords in request bodies: no request logging.
+[observability]
+enabled = false
