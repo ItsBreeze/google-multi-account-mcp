@@ -63,8 +63,8 @@ function sessionSecret() {
 }
 
 /** Consent URL for identity. No access_type=offline: there is nothing to refresh. */
-function signInUrl({ state, loginHint }) {
-  const { clientId, redirectUri } = google.config();
+function signInUrl({ state, loginHint, base }) {
+  const { clientId, redirectUri } = google.config(base);
 
   const params = new URLSearchParams({
     client_id:     clientId,

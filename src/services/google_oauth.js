@@ -70,10 +70,31 @@ function normalizeBaseUrl(raw) {
   return parsed.origin;
 }
 
-function config() {
+/**
+ * Every origin this deployment answers on: PUBLIC_BASE_URL first, then each one
+ * in PUBLIC_BASE_URL_ALIASES (comma-separated). Aliases let a move to a new
+ * domain run alongside the old one, so connectors set up on either keep working.
+ */
+function baseUrls() {
+  const all = [process.env.PUBLIC_BASE_URL, ...String(process.env.PUBLIC_BASE_URL_ALIASES || '').split(',')]
+    .map(normalizeBaseUrl).filter(Boolean);
+  return [...new Set(all)];
+}
+
+/**
+ * The origin a request came in on, when it is one of ours; otherwise
+ * PUBLIC_BASE_URL. An unknown Host header is never echoed back into a URL.
+ */
+function baseUrlFor(req) {
+  const host = String(req?.get?.('host') || '').toLowerCase();
+  return baseUrls().find(url => new URL(url).host === host) || normalizeBaseUrl(process.env.PUBLIC_BASE_URL);
+}
+
+/** base: the origin the browser is on (baseUrlFor), so Google returns it to the same host and its cookie. */
+function config(base) {
   const clientId     = (process.env.GOOGLE_CLIENT_ID || '').trim();
   const clientSecret = (process.env.GOOGLE_CLIENT_SECRET || '').trim();
-  const baseUrl      = normalizeBaseUrl(process.env.PUBLIC_BASE_URL);
+  const baseUrl      = base || normalizeBaseUrl(process.env.PUBLIC_BASE_URL);
 
   if (!clientId || !clientSecret || !baseUrl) {
     throw new Error('GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and PUBLIC_BASE_URL must all be set');
@@ -89,8 +110,8 @@ function config() {
  * refresh token. Without prompt=consent, a re-link of an already-granted
  * account returns an access token only and we lose long-lived access.
  */
-function authUrl({ state, loginHint }) {
-  const { clientId, redirectUri } = config();
+function authUrl({ state, loginHint, base }) {
+  const { clientId, redirectUri } = config(base);
 
   const params = new URLSearchParams({
     client_id:     clientId,
@@ -125,8 +146,8 @@ async function postToken(body) {
   return json;
 }
 
-async function exchangeCode(code) {
-  const { clientId, clientSecret, redirectUri } = config();
+async function exchangeCode(code, base) {
+  const { clientId, clientSecret, redirectUri } = config(base);
   return postToken({
     code,
     client_id:     clientId,
@@ -203,4 +224,4 @@ async function revoke(token) {
   }).catch(() => {}); // best-effort — local delete still proceeds
 }
 
-module.exports = { normalizeBaseUrl, verifyCredentials, authUrl, exchangeCode, refreshAccessToken, fetchUserinfo, revoke, SCOPES, PRODUCT_SCOPES, config };
+module.exports = { normalizeBaseUrl, baseUrls, baseUrlFor, verifyCredentials, authUrl, exchangeCode, refreshAccessToken, fetchUserinfo, revoke, SCOPES, PRODUCT_SCOPES, config };

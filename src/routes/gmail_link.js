@@ -126,7 +126,7 @@ router.get('/signin', (req, res, next) => {
       { expiresIn: '10m' },
     );
 
-    res.redirect(302, identity.signInUrl({ state, loginHint: req.query.login_hint || undefined }));
+    res.redirect(302, identity.signInUrl({ state, loginHint: req.query.login_hint || undefined, base: google.baseUrlFor(req) }));
   } catch (err) {
     next(err);
   }
@@ -192,7 +192,7 @@ router.post('/connect', express.urlencoded({ extended: false }), (req, res, next
       { expiresIn: '10m' },
     );
 
-    res.redirect(302, google.authUrl({ state, loginHint: req.body?.login_hint || undefined }));
+    res.redirect(302, google.authUrl({ state, loginHint: req.body?.login_hint || undefined, base: google.baseUrlFor(req) }));
   } catch (err) {
     next(err);
   }
@@ -343,7 +343,7 @@ router.get('/oauth/callback', async (req, res, next) => {
         <a class="btn" href="/gmail/connect">Start over</a>`));
     }
 
-    const tokens = await google.exchangeCode(req.query.code);
+    const tokens = await google.exchangeCode(req.query.code, google.baseUrlFor(req));
     const info   = await google.fetchUserinfo(tokens.access_token);
 
     if (!info.email) throw new Error('Google did not return an email address for this account');

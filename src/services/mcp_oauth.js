@@ -24,8 +24,9 @@ const REFRESH_TTL_DAYS   = 90;
 const sha256 = (input) => crypto.createHash('sha256').update(input).digest();
 const b64url = (buf) => buf.toString('base64url');
 
-function baseUrl() {
-  const url = require('./google_oauth').normalizeBaseUrl(process.env.PUBLIC_BASE_URL);
+/** With a request, the origin it came in on (see google_oauth.baseUrlFor). */
+function baseUrl(req) {
+  const url = require('./google_oauth').baseUrlFor(req);
   if (!url) throw new Error('PUBLIC_BASE_URL is missing or malformed');
   return url;
 }
@@ -47,18 +48,20 @@ function secret() {
 
 // ─── Metadata documents ─────────────────────────────────────────────────────
 
-const protectedResourceMetadata = () => ({
-  resource: `${baseUrl()}/mcp`,
-  authorization_servers: [baseUrl()],
+// Built per request: a client checks that the resource and issuer match the
+// address it connected to, so each domain must describe itself.
+const protectedResourceMetadata = (req) => ({
+  resource: `${baseUrl(req)}/mcp`,
+  authorization_servers: [baseUrl(req)],
   scopes_supported: ['mcp'],
   bearer_methods_supported: ['header'],
 });
 
-const authorizationServerMetadata = () => ({
-  issuer: baseUrl(),
-  authorization_endpoint: `${baseUrl()}/mcp/oauth/authorize`,
-  token_endpoint: `${baseUrl()}/mcp/oauth/token`,
-  registration_endpoint: `${baseUrl()}/mcp/oauth/register`,
+const authorizationServerMetadata = (req) => ({
+  issuer: baseUrl(req),
+  authorization_endpoint: `${baseUrl(req)}/mcp/oauth/authorize`,
+  token_endpoint: `${baseUrl(req)}/mcp/oauth/token`,
+  registration_endpoint: `${baseUrl(req)}/mcp/oauth/register`,
   scopes_supported: ['mcp'],
   response_types_supported: ['code'],
   grant_types_supported: ['authorization_code', 'refresh_token'],
@@ -222,7 +225,8 @@ async function redeemRefreshToken({ refreshToken, clientId }) {
 }
 
 function verifyAccessToken(token) {
-  return jwt.verify(token, secret(), { audience: 'mcp', issuer: baseUrl() });
+  // Tokens are signed with PUBLIC_BASE_URL as issuer; ones issued before a domain move carry an alias.
+  return jwt.verify(token, secret(), { audience: 'mcp', issuer: require('./google_oauth').baseUrls() });
 }
 
 /** Housekeeping for expired codes and refresh tokens. */

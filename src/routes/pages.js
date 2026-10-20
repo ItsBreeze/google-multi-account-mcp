@@ -106,7 +106,7 @@ router.get('/', (req, res) => {
 
   ` : ''}<h2>Connect it</h2>
   <p>In Claude: Settings → Connectors → Add custom connector, with this URL:</p>
-  <p><code>${escapeHtml(google.normalizeBaseUrl(process.env.PUBLIC_BASE_URL) || 'https://<your-deployment>')}/mcp</code></p>
+  <p><code>${escapeHtml(google.baseUrlFor(req) || 'https://<your-deployment>')}/mcp</code></p>
   <a class="btn" href="/gmail/connect">Link a Google account</a>
 
   <h2>Source</h2>
