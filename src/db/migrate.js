@@ -1,6 +1,6 @@
 /**
  * Idempotent schema. Safe to run on every boot, and that is how server.js
- * uses it — six tables, no migration framework, no ordering to get wrong.
+ * uses it — eight tables, no migration framework, no ordering to get wrong.
  */
 
 const pool = require('./pool');
@@ -101,11 +101,41 @@ CREATE TABLE IF NOT EXISTS billing (
 );
 `;
 
+// AI-to-AI messages (services/ai_bus). A thread is named by the id of its
+// first message. wake_enc is crypto_box ciphertext: webhook headers can hold
+// a bearer token.
+const AI_SCHEMA = `
+CREATE TABLE IF NOT EXISTS ai_messages (
+  id          BIGSERIAL   PRIMARY KEY,
+  owner_key   TEXT        NOT NULL,
+  thread_id   BIGINT,
+  from_agent  TEXT        NOT NULL,
+  to_agent    TEXT        NOT NULL,
+  body        TEXT        NOT NULL,
+  hop         INT         NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  read_at     TIMESTAMPTZ,
+  wake_error  TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_messages_inbox  ON ai_messages(owner_key, to_agent, read_at);
+CREATE INDEX IF NOT EXISTS idx_ai_messages_thread ON ai_messages(owner_key, thread_id);
+
+CREATE TABLE IF NOT EXISTS ai_agents (
+  owner_key   TEXT        NOT NULL,
+  name        TEXT        NOT NULL,
+  about       TEXT,
+  wake_enc    TEXT,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (owner_key, name)
+);
+`;
+
 async function migrate() {
-  await pool.query(SCHEMA);
+  await pool.query(SCHEMA + AI_SCHEMA);
 }
 
-module.exports = { migrate };
+module.exports = { migrate, AI_SCHEMA };
 
 if (require.main === module) {
   migrate()

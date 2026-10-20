@@ -14,6 +14,7 @@ const MODULES = {
   drive:    require('./drive'),
   contacts: require('./contacts'),
   tasks:    require('./tasks'),
+  ai:       require('./ai'),
 };
 
 const TOOLS = Object.values(MODULES).flat();
@@ -40,6 +41,7 @@ const READ_ONLY = [
   'download_file_content', 'get_file_permissions',
   'search_contacts', 'list_contacts',
   'list_task_lists', 'list_tasks',
+  'ai_thread', 'ai_agents',
 ];
 // Irreversible, outward-facing, or removes/overwrites something.
 const DESTRUCTIVE = [
@@ -48,6 +50,7 @@ const DESTRUCTIVE = [
   'delete_event',
   'update_file', 'share_file', 'trash_file',
   'delete_task',
+  'ai_send',
 ];
 // Writes that add or change something recoverably.
 const ADDITIVE = [
@@ -55,6 +58,7 @@ const ADDITIVE = [
   'create_event', 'update_event', 'respond_to_event',
   'create_file', 'copy_file', 'comment_on_file', 'unshare_file', 'untrash_file',
   'create_task', 'update_task',
+  'ai_inbox', 'ai_set_agent',
 ];
 
 const titleFor = (name) => name.charAt(0).toUpperCase() + name.slice(1).replace(/_/g, ' ');

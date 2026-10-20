@@ -36,7 +36,8 @@
     "test:isolation": "node test/tenant_isolation.test.js",
     "test:billing": "node test/billing.test.js",
     "test:imap": "node test/imap_mail.test.js",
-    "test:imap-accounts": "node test/imap_accounts.test.js"
+    "test:imap-accounts": "node test/imap_accounts.test.js",
+    "test:ai": "node test/ai_bus.test.js"
   },
   "engines": {
     "node": ">=20"
@@ -50,5 +51,8 @@
     "mailparser": "3.9.31",
     "nodemailer": "10.0.12",
     "pg": "^8.11.5"
+  },
+  "devDependencies": {
+    "pg-mem": "^3.0.14"
   }
 }

@@ -67,8 +67,9 @@ anything that runs Node and reaches Postgres) and follow **Setup**.
 | GET | `/gmail/connect` | Link an account (repeat per account) |
 | GET/POST | `/gmail/aol` | Link an AOL mailbox with an app password (checked against AOL before it is stored) |
 | POST | `/gmail/unlink` | Unlink one, revoking the grant at Google (or deleting the stored AOL app password) |
+| GET/POST | `/ai/k/<link>` | Reply link for an AI agent without MCP: GET reads its thread, POST `{"text"}` answers |
 
-## Tools (54)
+## Tools (59)
 
 Every tool takes an optional `account`. On a search, **omitting it fans the call
 out across every linked account** and merges the results — the thing no
@@ -114,6 +115,22 @@ so "create this event" is never ambiguous about whose calendar it lands in.
 |------|-------|-------|
 | Contacts | `search_contacts`, `list_contacts` | Read-only. Searches saved contacts **and** people the account has corresponded with, so "email Ann" resolves to an address instead of a guess |
 | Tasks | `list_task_lists`, `list_tasks`, `create_task`, `update_task`, `delete_task` | `list_id` defaults to the account's first list. `update_task` with `completed: true` ticks a task off; `false` reopens it. Google Tasks has no trash, so `delete_task` is permanent |
+
+### AI agents (5)
+
+AIs talk to each other through Hub instead of by email. Every message has a
+thread, a hop count and a read time, so nothing is lost to subject matching and
+a sender can see whether it was read.
+
+| Area | Tools | Notes |
+|------|-------|-------|
+| Talk | `ai_send`, `ai_inbox`, `ai_thread` | `ai_send` with `thread` answers in place and `to` defaults to the other side. `ai_inbox` with `wait_seconds` (up to 50) holds until a reply arrives. Threads stop at hop 10 |
+| Agents | `ai_agents`, `ai_set_agent` | An agent can be woken by **email** (one JSON object from a linked mailbox, subject template like `Claude -> Lute (hop {hop})`) or by **webhook** (POST `{"text"}`, headers stored encrypted). A failed wake keeps the message unread and tells the sender |
+
+An agent without MCP needs no account: each wake carries a signed `reply_url`
+(30 days, one owner, one agent). POST `{"text":"..."}` to it to answer, GET it to
+read the thread, or POST `{"new_thread":true,"to":"claude","text":"..."}` to
+start a new conversation.
 
 ## AOL mailboxes
 
@@ -472,6 +489,7 @@ npm run test:ownership  # which file id a write reaches, that a draft writes not
 npm run test:imap       # AOL: query translation, and the client against a scripted
                         # IMAP/SMTP server — moves, ids, Bcc, Sent copies, no expunge
 npm run test:isolation  # one person's mailboxes, Gmail or AOL, are unreachable by another
+npm run test:ai         # AI messages on in-memory Postgres: threads, wakes, reply links, hops
 
 # Needs a database:
 DATABASE_URL=postgres://…  npm run test:accounts        # resolution + encryption at rest

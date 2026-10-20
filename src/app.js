@@ -15,6 +15,7 @@ const pagesRoutes      = require('./routes/pages');
 const gmailLinkRoutes  = require('./routes/gmail_link');
 const { router: mcpRoutes, requireConfigured } = require('./routes/mcp');
 const billingRoutes    = require('./routes/billing');
+const aiRoutes         = require('./routes/ai');
 const mcpOauth = require('./services/mcp_oauth');
 
 const app = express();
@@ -85,6 +86,8 @@ app.post('/gmail/aol',           authLimiter);
 app.use('/mcp',   mcpLimiter, requireConfigured, mcpRoutes);
 app.use('/gmail', requireConfigured, gmailLinkRoutes);
 app.use('/billing', authLimiter, requireConfigured, billingRoutes.router);
+// Reply links for AI agents without MCP: the signed path is the credential.
+app.use('/ai', mcpLimiter, requireConfigured, aiRoutes);
 
 // Public pages last among real routes: home, privacy, terms. Not behind
 // requireConfigured — a half-configured deployment should still be able to
