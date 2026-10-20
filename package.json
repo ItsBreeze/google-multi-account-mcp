@@ -37,7 +37,8 @@
     "test:billing": "node test/billing.test.js",
     "test:imap": "node test/imap_mail.test.js",
     "test:imap-accounts": "node test/imap_accounts.test.js",
-    "test:ai": "node test/ai_bus.test.js"
+    "test:ai": "node test/ai_bus.test.js",
+    "test:hosts": "node test/base_urls.test.js"
   },
   "engines": {
     "node": ">=20"

@@ -66,17 +66,17 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
 // RFC 9728 / RFC 8414 discovery. Clients probe both the bare path and the
 // resource-path-suffixed form, so serve both.
 const oauthMetadata = (build) => [requireConfigured, (req, res, next) => {
-  try { res.json(build()); } catch (err) { next(err); }
+  try { res.json(build(req)); } catch (err) { next(err); }
 }];
 
 app.get('/.well-known/oauth-protected-resource',
-  oauthMetadata(() => mcpOauth.protectedResourceMetadata()));
+  oauthMetadata((req) => mcpOauth.protectedResourceMetadata(req)));
 app.get('/.well-known/oauth-protected-resource/mcp',
-  oauthMetadata(() => mcpOauth.protectedResourceMetadata()));
+  oauthMetadata((req) => mcpOauth.protectedResourceMetadata(req)));
 app.get('/.well-known/oauth-authorization-server',
-  oauthMetadata(() => mcpOauth.authorizationServerMetadata()));
+  oauthMetadata((req) => mcpOauth.authorizationServerMetadata(req)));
 app.get('/.well-known/oauth-authorization-server/mcp',
-  oauthMetadata(() => mcpOauth.authorizationServerMetadata()));
+  oauthMetadata((req) => mcpOauth.authorizationServerMetadata(req)));
 
 app.post('/mcp/oauth/authorize', authLimiter);
 app.get('/gmail/signin',         authLimiter);

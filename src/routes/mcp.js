@@ -241,7 +241,7 @@ function requireMcpAuth(req, res, next) {
   const header = req.headers.authorization || '';
 
   // The resource_metadata hint is how the client discovers where to authorize.
-  const challenge = `Bearer resource_metadata="${oauth.baseUrl()}/.well-known/oauth-protected-resource"`;
+  const challenge = `Bearer resource_metadata="${oauth.baseUrl(req)}/.well-known/oauth-protected-resource"`;
 
   if (!header.startsWith('Bearer ')) {
     res.set('WWW-Authenticate', challenge);
