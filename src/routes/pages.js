@@ -22,7 +22,7 @@ const router = express.Router();
 router.get('/logo.png', (req, res) => res.sendFile(require('path').join(__dirname, '../../public/logo.png')));
 
 const APP_NAME = 'Hub';
-const CONTACT  = (process.env.SUPPORT_EMAIL || 'brisebyme@gmail.com').trim();
+const CONTACT  = (process.env.SUPPORT_EMAIL || 'support@brisebois.xyz').trim();
 const UPDATED  = 'October 14, 2026';
 
 const billing = require('../services/billing');
