@@ -17,6 +17,19 @@ const {
 } = require('../shared');
 
 /** A move on IMAP gives the message a new id; say so instead of leaving the old one to fail later. */
+const sendAs = require('../../services/send_as');
+
+const FROM_PROPS = {
+  from:     { type: 'string', description: 'Optional send-as address (plain email). Must be this mailbox or one of its verified Gmail "Send mail as" aliases; anything else is rejected. Omit to send as the mailbox itself.' },
+  fromName: { type: 'string', description: 'Optional display name for the From header, e.g. "brisebois.xyz Support". Defaults to the alias\'s Gmail display name when `from` is an alias.' },
+};
+
+/** The From header for this send — the bare mailbox address unless from/fromName ask otherwise. */
+const fromFor = (box, args) => sendAs.resolveFrom({
+  mailbox: box.email, from: args.from, fromName: args.fromName,
+  listSendAs: typeof box.api.listSendAs === 'function' ? () => box.api.listSendAs(box.handle) : null,
+});
+
 const movedTo = (result) => (result?.moved_to ? { moved_to: result.moved_to, new_message_id: result.id } : {});
 
 const TOOLS = [
@@ -211,26 +224,30 @@ const TOOLS = [
   // ─── Sending ──────────────────────────────────────────────────────────────
   {
     name: 'send_message',
-    description: 'Send a new email immediately from a specific linked mailbox. To let the user review first, use create_draft instead.',
+    description: 'Send a new email immediately from a specific linked mailbox. To let the user review first, use create_draft instead. ' +
+      'Pass `from` to send as a verified Gmail send-as alias of that mailbox (and `fromName` for the display name).',
     inputSchema: {
       type: 'object',
       properties: {
-        account: { type: 'string', description: 'Mailbox to send FROM — this sets the From address.' },
+        account: { type: 'string', description: 'Mailbox to send through — sets the From address unless `from` names one of its aliases.' },
         to:      { type: 'string', description: 'Recipient(s), comma-separated.' },
         subject: { type: 'string' },
         body:    { type: 'string', description: 'Plain-text body.' },
         cc:      { type: 'string' },
         bcc:     { type: 'string' },
+        ...FROM_PROPS,
       },
       required: ['to', 'subject', 'body'],
     },
     handler: async ({ ownerKey, args }) => {
-      const { email, api, handle } = await mailFor(ownerKey, args.account);
+      const box = await mailFor(ownerKey, args.account);
+      const { email, api, handle } = box;
+      const from = await fromFor(box, args);
       const sent = await api.sendMessage(handle, {
-        from: email, to: args.to, cc: args.cc, bcc: args.bcc,
+        from: from.header, to: args.to, cc: args.cc, bcc: args.bcc,
         subject: args.subject, body: args.body,
       });
-      return text({ sent_from: email, message_id: sent.id, thread_id: sent.threadId });
+      return text({ sent_from: from.address, ...(from.address !== email ? { account: email } : {}), message_id: sent.id, thread_id: sent.threadId });
     },
   },
 
@@ -244,20 +261,24 @@ const TOOLS = [
         message_id: { type: 'string', description: 'Message being replied to.' },
         body:       { type: 'string', description: 'Plain-text reply body.' },
         reply_all:  { type: 'boolean', description: 'Include original To and Cc recipients. Default false.' },
+        ...FROM_PROPS,
       },
       required: ['message_id', 'body'],
     },
     handler: async ({ ownerKey, args }) => {
-      const { email, api, handle } = await mailFor(ownerKey, args.account);
+      const box = await mailFor(ownerKey, args.account);
+      const { email, api, handle } = box;
+      const from = await fromFor(box, args);
       const ctx = await api.getReplyContext(handle, args.message_id);
 
       // Drop our own address from a reply-all so we don't mail ourselves.
       const others = [ctx.to, ctx.cc].filter(Boolean).join(', ')
         .split(',').map(s => s.trim())
-        .filter(s => s && !s.toLowerCase().includes(email.toLowerCase()));
+        .filter(s => s && !s.toLowerCase().includes(email.toLowerCase())
+                     && !s.toLowerCase().includes(from.address.toLowerCase()));
 
       const sent = await api.sendMessage(handle, {
-        from: email,
+        from: from.header,
         to: ctx.from,
         cc: args.reply_all && others.length ? others.join(', ') : undefined,
         subject: ctx.subject,
@@ -267,7 +288,7 @@ const TOOLS = [
         references: [ctx.references, ctx.messageId].filter(Boolean).join(' '),
       });
 
-      return text({ replied_from: email, message_id: sent.id, thread_id: sent.threadId });
+      return text({ replied_from: from.address, ...(from.address !== email ? { account: email } : {}), message_id: sent.id, thread_id: sent.threadId });
     },
   },
 
@@ -282,16 +303,20 @@ const TOOLS = [
         to:         { type: 'string', description: 'Recipient(s), comma-separated.' },
         cc:         { type: 'string' },
         note:       { type: 'string', description: 'Optional text placed above the forwarded content.' },
+        ...FROM_PROPS,
       },
       required: ['message_id', 'to'],
     },
     handler: async ({ ownerKey, args }) => {
-      const { email, api, handle } = await mailFor(ownerKey, args.account);
+      const box = await mailFor(ownerKey, args.account);
+      const { email, api, handle } = box;
+      const from = await fromFor(box, args);
       const { sent, skippedAttachments } = await api.forwardMessage(handle, {
-        from: email, messageId: args.message_id, to: args.to, cc: args.cc, note: args.note,
+        from: from.header, messageId: args.message_id, to: args.to, cc: args.cc, note: args.note,
       });
       return text({
-        forwarded_from: email,
+        forwarded_from: from.address,
+        ...(from.address !== email ? { account: email } : {}),
         message_id: sent.id,
         thread_id: sent.threadId,
         ...(skippedAttachments.length ? { attachments_skipped_for_size: skippedAttachments } : {}),
@@ -309,24 +334,27 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        account: { type: 'string', description: 'Mailbox the draft belongs to (sets the From address).' },
+        account: { type: 'string', description: 'Mailbox the draft belongs to (sets the From address unless `from` names one of its aliases).' },
         to:      { type: 'string', description: 'Recipient(s). Optional when replying — defaults to the original sender.' },
         subject: { type: 'string', description: 'Ignored when replying — the thread subject is kept.' },
         body:    { type: 'string', description: 'Plain-text body.' },
         cc:      { type: 'string' },
         bcc:     { type: 'string' },
         reply_to_message_id: { type: 'string', description: 'Draft a reply to this message, in its thread.' },
+        ...FROM_PROPS,
       },
       required: ['body'],
     },
     handler: async ({ ownerKey, args }) => {
-      const { email, provider, api, handle } = await mailFor(ownerKey, args.account);
+      const box = await mailFor(ownerKey, args.account);
+      const { email, provider, api, handle } = box;
+      const fromH = (await fromFor(box, args)).header;
 
       let mime;
       if (args.reply_to_message_id) {
         const ctx = await api.getReplyContext(handle, args.reply_to_message_id);
         mime = {
-          from: email,
+          from: fromH,
           to: args.to || ctx.from,
           cc: args.cc, bcc: args.bcc,
           subject: ctx.subject,
@@ -338,7 +366,7 @@ const TOOLS = [
       } else {
         if (!args.to) throw new Error('`to` is required for a new (non-reply) draft.');
         if (!args.subject) throw new Error('`subject` is required for a new (non-reply) draft.');
-        mime = { from: email, to: args.to, cc: args.cc, bcc: args.bcc, subject: args.subject, body: args.body };
+        mime = { from: fromH, to: args.to, cc: args.cc, bcc: args.bcc, subject: args.subject, body: args.body };
       }
 
       const draft = await api.createDraft(handle, mime);
@@ -409,16 +437,31 @@ const TOOLS = [
 
   {
     name: 'send_draft',
-    description: 'Send an existing draft as-is.',
+    description:
+      'Send an existing draft. Sent as-is unless `from`/`fromName` are given, in which case (Gmail only) the draft\'s ' +
+      'From header is rewritten to that verified send-as alias first, then sent. AOL drafts cannot change sender.',
     inputSchema: {
       type: 'object',
-      properties: { ...ACCOUNT_PROP, draft_id: { type: 'string' } },
+      properties: { ...ACCOUNT_PROP, draft_id: { type: 'string' }, ...FROM_PROPS },
       required: ['draft_id'],
     },
     handler: async ({ ownerKey, args }) => {
-      const { email, api, handle } = await mailFor(ownerKey, args.account);
+      const box = await mailFor(ownerKey, args.account);
+      const { email, api, handle } = box;
+      let sentFrom = email;
+      if (args.from || args.fromName) {
+        if (typeof api.getDraftRaw !== 'function') {
+          throw new Error('This mailbox cannot change a draft\'s sender at send time. Recreate it with create_draft and `from`.');
+        }
+        const from = await fromFor(box, args);
+        const draft = await api.getDraftRaw(handle, args.draft_id);
+        await api.putDraftRaw(handle, args.draft_id, {
+          raw: sendAs.replaceFromHeader(draft.raw, from.header), threadId: draft.threadId,
+        });
+        sentFrom = from.address;
+      }
       const sent = await api.sendDraft(handle, args.draft_id);
-      return text({ sent_from: email, message_id: sent.id, thread_id: sent.threadId });
+      return text({ sent_from: sentFrom, ...(sentFrom !== email ? { account: email } : {}), message_id: sent.id, thread_id: sent.threadId });
     },
   },
 

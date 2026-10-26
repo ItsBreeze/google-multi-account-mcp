@@ -530,6 +530,26 @@ const deleteDraft = (accessToken, draftId) =>
 
 const getProfile = (accessToken) => call(accessToken, '/profile');
 
+/** Send-as identities (primary + aliases). Readable under gmail.modify. */
+async function listSendAs(accessToken) {
+  const res = await call(accessToken, '/settings/sendAs');
+  return res.sendAs || [];
+}
+
+/** A draft's raw RFC 5322 source and thread, for rewriting before send. */
+async function getDraftRaw(accessToken, draftId) {
+  const d = await call(accessToken, `/drafts/${draftId}`, { query: { format: 'raw' } });
+  return { raw: Buffer.from(d.message.raw, 'base64url').toString('utf8'), threadId: d.message.threadId };
+}
+
+/** Overwrite a draft with an already-built raw message string. */
+async function putDraftRaw(accessToken, draftId, { raw, threadId }) {
+  return call(accessToken, `/drafts/${draftId}`, {
+    method: 'PUT',
+    body: { message: { raw: Buffer.from(raw, 'utf8').toString('base64url'), ...(threadId ? { threadId } : {}) } },
+  });
+}
+
 module.exports = {
   searchMessages, searchThreads, getMessage, getThread, getAttachmentData, getAttachment,
   sendMessage, getReplyContext, forwardMessage,
@@ -537,7 +557,7 @@ module.exports = {
   listLabels, createLabel, updateLabel, deleteLabel,
   trashMessage, untrashMessage, trashThread, untrashThread,
   listDrafts, getDraft, createDraft, updateDraft, sendDraft, deleteDraft,
-  getProfile,
+  getProfile, listSendAs, getDraftRaw, putDraftRaw,
   MAX_BODY_CHARS,
   buildRawMime, htmlToText, parseAddresses, addressOf, decodeEntities, truncateBody,
   _internal: { buildMime, extractBody, encodeHeader, buildUrl, decodeEntities, collectAttachments, truncateBody,
