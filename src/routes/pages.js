@@ -31,7 +31,7 @@ const escapeHtml = (s) => String(s).replace(/[&<>"']/g,
   c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // The owner's Instagram handles, in the order every one of the owner's sites lists them.
-const INSTAGRAM_LINKS = ['kebe_keyboards', 'unslip.app', 'offhand.app', 'grounders.app', 'itsradio.app', 'hub.ai.app']
+const INSTAGRAM_LINKS = ['brisebois.boards', 'unslip.app', 'offhand.app', 'grounders.app', 'itsradio.app', 'hub.ai.app']
   .map(h => `<a href="https://www.instagram.com/${h}/">@${h}</a>`);
 
 /** Wide, left-aligned column — these are documents, not dialogs. */
